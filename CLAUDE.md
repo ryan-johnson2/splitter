@@ -1,0 +1,110 @@
+# Splitter
+
+Personal VelociDrone lap timer. Runs in a Proxmox LXC, connects to the game's
+local websocket on the gaming PC, and is watched on a tablet while flying:
+gate-by-gate splits against your PB live, every run logged, analysis pages
+afterwards. Successor to the archived `velocidrone-lap-tracking` (Flask +
+Socket.IO + manual session entry); built in Marshal's shape.
+
+## Architecture (one asyncio process)
+
+- FastAPI (uvicorn) serves the pages and a **native websocket** at `/ws/live`;
+  its lifespan supervises one task, `game/bridge.py::GameBridge`, which holds
+  the connection to the game (`velocidrone-ws` sibling library), pings every
+  5 s, and reconnects with backoff. The bridge is the only module that talks
+  to the game.
+- `game/controller.py::RaceController` turns game events into DB rows and
+  live messages. `core/` is pure and the most-tested part:
+  `timing.py::RaceTracker` (snapshots → crossings/laps), `splits.py::Reference`
+  (PB deltas by crossing index), `telemetry.py::TelemetryBuffer` (IMU samples
+  → per-segment speed/distance, downsampling).
+- `live/hub.py::LiveHub` fans messages out to browser sockets (per-client
+  queues, oldest dropped when full). The live page gets a full `snapshot` on
+  connect and can ask for another with a `"snapshot"` text frame (used on tab
+  focus).
+- SQLite (aiosqlite + SQLAlchemy 2.0 async, WAL). `create_all` at startup plus
+  automatic `ADD COLUMN` for additive changes (`db/engine.py::init_db`).
+- Runtime knobs live in the `settings` table (`db/runtime_settings.py`),
+  edited on the Settings page; env (`config.py`) only has `DATABASE_URL`,
+  `HOST`, `PORT`.
+
+## Race lifecycle (what the game sends, 1.17.13)
+
+```
+racestatus:start → armed
+racetype         → race mode / format / laps (the only SP info about the run)
+countdown 3..0   → 0 = GO: Race row created, PB reference loaded
+FinishGate       → track-shape flag (has a distinct start/finish gate)
+racedata …       → one crossing per new (lap, gate); a lap closes on the first
+                   snapshot with a higher lap number; finished:"True" ends it
+racestatus:"race finished" / "abort"
+```
+
+- If the single-player countdown is off there are no countdown frames: the
+  first racedata after arming starts the race.
+- An abort with zero crossings deletes the row; with crossings it is kept as
+  `aborted`. A `start` while a race is running aborts the old one first.
+- **Single player never names the track.** `session` (track, scenery, quad,
+  laps) only fires when *this* machine creates a multiplayer room. Splitter
+  therefore keeps a `SessionState` with a `source`: `game` (session event),
+  `sticky` (carried over from the last run, persisted in settings as
+  `last_*`), or `manual` (the "Track…" dialog on the live page, `POST
+  /api/session`). Runs record `session_source`, and the Races page has bulk
+  edit to fix mis-attributed runs. Whether Nemesis mode emits anything extra
+  is unknown — the Protocol page (raw frame log, `event_log` table) exists to
+  answer that.
+- PBs are per **(track, quad, race_laps)**. `is_best` is re-flagged on finish,
+  edit and delete (`repos.recalculate_best`).
+- Which racedata entry is "me": the `player_name` setting, else the only
+  pilot, else skip with a one-time notice.
+
+## Telemetry (IMU)
+
+Opt-in in the game (`web-socket-imu`, Betaflight FC only), 60 Hz, local drone
+only, all JSON numbers, streams whenever flying (not just in races). Splitter
+keeps every sample of a race in memory, aligns the game clock to the race clock
+on the first frame after GO, computes max/avg speed and distance per gate and
+per lap from the full stream, and stores a downsampled trace
+(`telemetry_store_hz`, default 20) for the flight-path and speed charts on the
+race page. Speed = |velocity| in m/s, shown as km/h. `imu` frames are logged
+to the event log at most once per 5 s.
+
+## Wire facts to remember
+
+All race-event scalars are strings (`"3"`, `"69.711"`, `"True"`), `uid` in
+racedata is a number, `imu` is all numbers, `spectatorChange` is a bare string;
+server frames are binary; the game listens on its LAN IP only (never
+loopback); newest client wins the feed. Full spec:
+`../velocidrone-libraries/velocidrone-websocket/docs/ws-spec.md`.
+
+## Pages
+
+`/` live (tablet), `/races` + `/races/{id}` (laps, gates vs PB, flight path,
+speed chart, edit/delete, bulk edit), `/tracks` + `/tracks/detail` (PB,
+progression chart, gate consistency, theoretical best), `/settings`,
+`/protocol` (raw frames). JSON: `/api/state`, `/api/session`,
+`/api/connection`, `/api/races[/{id}]`, `/healthz`.
+
+## Build & tooling
+
+Hatch, mypy strict, ruff, pytest — same as Marshal. **Run tests/lint/typecheck
+in a container, never on the host** (no uv/hatch/venv on the host):
+
+```sh
+docker compose --profile dev build test          # once, and after dependency changes
+docker compose --profile dev run --rm test       # pytest
+docker compose --profile dev run --rm test ruff check src tests
+docker compose --profile dev run --rm test mypy src
+```
+
+The build context is the parent directory so the image can install the sibling
+`velocidrone-libraries/velocidrone-websocket`. Never hit a real game from tests.
+
+Exercise the whole pipeline without the game:
+`splitter fake-game --port 60003 --loop [--no-session] [--speed 5]` (a
+scripted server speaking the real wire shapes), then set the game address to
+that host on the Settings page.
+
+Deploy: `deploy/lxc/` (bundle = both wheels + installer + unit; `install.sh`
+is idempotent and is the upgrade path). Docker: `docker compose up -d`, data in
+`./data`, port 8100.

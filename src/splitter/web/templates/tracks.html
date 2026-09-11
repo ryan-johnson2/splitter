@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{{ brand_name }} · Tracks{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Tracks</h1><p class="sub">One row per track, quad and race length — the combination a personal best is kept for.</p></div>
+<div class="card">
+  {% if not summaries %}<p class="empty">Nothing recorded yet.</p>{% else %}
+  <table class="stack">
+    <tr><th>Track</th><th>Quad</th><th class="num">Laps</th><th class="num">Runs</th><th class="num">PB</th><th class="num">Best lap</th><th>Last flown</th></tr>
+    {% for s in summaries %}
+    <tr>
+      <td><a href="/tracks/detail?track={{ s.track_name | urlencode }}&quad={{ s.quad_type | urlencode }}&laps={{ s.race_laps }}">{{ s.track_name or "Unknown track" }}</a>{% if s.scenery %} <span class="muted small">{{ s.scenery }}</span>{% endif %}</td>
+      <td data-label="Quad">{{ s.quad_type or "—" }}</td>
+      <td data-label="Laps" class="num">{{ s.race_laps or "?" }}</td>
+      <td data-label="Runs" class="num">{{ s.finished }}<span class="muted">/{{ s.runs }}</span></td>
+      <td data-label="PB" class="num">{% if s.best_race_id %}<a href="/races/{{ s.best_race_id }}">{{ format_ms(s.best_ms) }}</a>{% else %}--{% endif %}</td>
+      <td data-label="Best lap" class="num">{{ format_ms(s.best_lap_ms) }}</td>
+      <td data-label="Last flown" class="muted"><time datetime="{{ utc_iso(s.last_run_at) }}">{{ s.last_run_at }}</time></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+{% endblock %}

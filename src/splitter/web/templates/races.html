@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}{{ brand_name }} · Races{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Races</h1>
+  <form method="get" class="actions inline-form">
+    <select name="track"><option value="">all tracks</option>{% for t in tracks %}<option value="{{ t }}" {% if t == filter.track %}selected{% endif %}>{{ t }}</option>{% endfor %}</select>
+    <select name="quad"><option value="">all quads</option>{% for q in quads %}<option value="{{ q }}" {% if q == filter.quad %}selected{% endif %}>{{ q }}</option>{% endfor %}</select>
+    <select name="status"><option value="">any status</option>{% for s in ["finished", "aborted"] %}<option value="{{ s }}" {% if s == filter.status %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+    <button type="submit" class="btn sm">Filter</button>
+  </form>
+</div>
+
+<form method="post" action="/races/bulk" id="bulk-form">
+<div class="card">
+  {% if not races %}<p class="empty">No races yet. Fly one.</p>{% else %}
+  <table class="stack">
+    <tr><th></th><th>When</th><th>Track</th><th>Quad</th><th class="num">Laps</th><th class="num">Time</th><th class="num">vs PB</th><th class="num">Top km/h</th><th></th></tr>
+    {% for r in races %}
+    <tr class="{% if r.is_best %}best{% endif %}">
+      <td><input type="checkbox" name="race_ids" value="{{ r.id }}"></td>
+      <td data-label="When"><a href="/races/{{ r.id }}"><time datetime="{{ utc_iso(r.started_at) }}">{{ r.started_at }}</time></a></td>
+      <td data-label="Track">{{ r.track_name or "—" }}{% if r.scenery %} <span class="muted small">{{ r.scenery }}</span>{% endif %}</td>
+      <td data-label="Quad">{{ r.quad_type or "—" }}</td>
+      <td data-label="Laps" class="num">{{ r.total_laps }}{% if r.race_laps %}/{{ r.race_laps }}{% endif %}</td>
+      <td data-label="Time" class="num">{% if r.status == "finished" %}{{ format_ms(r.total_time_ms) }}{% else %}<span class="pill bad">aborted</span>{% endif %}</td>
+      <td data-label="vs PB" class="num {{ delta_class(r.pb_delta_ms) }}">{{ format_delta(r.pb_delta_ms) if r.status == "finished" else "" }}</td>
+      <td data-label="Top km/h" class="num">{{ format_speed(r.max_speed) }}</td>
+      <td>{% if r.is_best %}<span class="pill accent">PB</span>{% endif %}{% if r.session_source == "manual" %}<span class="pill dim" title="track entered by hand">manual</span>{% elif r.session_source == "sticky" %}<span class="pill dim" title="track carried over from the previous run">carried</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+{% if races %}
+<details>
+  <summary>Bulk edit selected</summary>
+  <p class="help">Fix the track/quad on runs recorded with the wrong session, or delete them. Blank fields are left alone.</p>
+  <div class="inline-form" style="margin-top:.6rem">
+    <input name="track_name" placeholder="track name" list="track-list"><datalist id="track-list">{% for t in tracks %}<option value="{{ t }}">{% endfor %}</datalist>
+    <input name="scenery" placeholder="scenery">
+    <input name="quad_type" placeholder="quad" list="quad-list"><datalist id="quad-list">{% for q in quads %}<option value="{{ q }}">{% endfor %}</datalist>
+    <button type="submit" name="action" value="update" class="primary">Apply</button>
+    <button type="submit" name="action" value="delete" class="danger" onclick="return confirm('Delete the selected races?')">Delete</button>
+  </div>
+</details>
+{% endif %}
+</form>
+{% endblock %}

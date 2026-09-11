@@ -1,0 +1,29 @@
+[Unit]
+Description=Splitter — VelociDrone lap timer (gate splits, telemetry, analysis)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=splitter
+Group=splitter
+WorkingDirectory=/var/lib/splitter
+EnvironmentFile=/etc/splitter/splitter.env
+ExecStart=/opt/splitter/venv/bin/python -m splitter
+Restart=always
+RestartSec=5
+
+# One asyncio process; SIGTERM runs the FastAPI lifespan shutdown (closes the
+# game connection and disposes the engine).
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+# Sandboxing kept to options that behave in an unprivileged Proxmox CT.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/splitter
+
+[Install]
+WantedBy=multi-user.target

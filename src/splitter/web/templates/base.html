@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ brand_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  {% block head %}{% endblock %}
+</head>
+<body>
+<header id="top">
+  <a class="brand" href="/"><span>⏱</span><span>{{ brand_name }}</span></a>
+  <button type="button" class="menu-btn" aria-label="Menu" aria-controls="main-nav" aria-expanded="false"
+          onclick="var h=document.getElementById('top'); h.classList.toggle('open'); this.setAttribute('aria-expanded', h.classList.contains('open'))">☰</button>
+  <nav id="main-nav">
+    {% set path = request.url.path %}
+    <a href="/" {% if path == "/" %}class="active"{% endif %}>Live</a>
+    <a href="/races" {% if path.startswith("/races") %}class="active"{% endif %}>Races</a>
+    <a href="/tracks" {% if path.startswith("/tracks") %}class="active"{% endif %}>Tracks</a>
+    <a href="/settings" {% if path.startswith("/settings") %}class="active"{% endif %}>Settings</a>
+    <a href="/protocol" {% if path.startswith("/protocol") %}class="active"{% endif %}>Protocol</a>
+  </nav>
+  <span class="who"><span class="conn {% if game_connected %}on{% endif %}" id="conn-dot" title="game connection"></span> <span id="conn-label">{{ "game connected" if game_connected else "game offline" }}</span></span>
+</header>
+<main class="{% block main_class %}{% endblock %}">
+{% if request.query_params.get("notice") %}<div class="flash notice">{{ request.query_params.get("notice") }}</div>{% endif %}
+{% if request.query_params.get("error") %}<div class="flash error">{{ request.query_params.get("error") }}</div>{% endif %}
+{% block content %}{% endblock %}
+</main>
+<footer>
+  <span>{{ brand_name }} v{{ app_version }}</span>
+  <span>·</span>
+  <a href="/healthz">health</a>
+</footer>
+<script>
+  function localizeTimes(root) {
+    var fmt = new Intl.DateTimeFormat(undefined, {dateStyle: "medium", timeStyle: "short"});
+    (root || document).querySelectorAll("time[datetime]").forEach(function (el) {
+      var d = new Date(el.getAttribute("datetime"));
+      if (!isNaN(d)) { el.textContent = fmt.format(d); el.title = d.toUTCString(); }
+    });
+  }
+  localizeTimes();
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}{{ brand_name }} · {{ track }}{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<div class="page-head"><h1>{{ track or "Unknown track" }}</h1><p class="sub">{{ quad or "any quad" }} · {{ laps or "?" }} laps · {{ finished_count }} finished of {{ races | length }} runs</p></div>
+
+<div class="grid">
+  <div class="card kv">Personal best<b class="big">{% if best %}<a href="/races/{{ best.id }}">{{ format_ms(best.total_time_ms) }}</a>{% else %}--{% endif %}</b>{% if best %}<time datetime="{{ utc_iso(best.started_at) }}">{{ best.started_at }}</time>{% endif %}</div>
+  <div class="card kv">Best lap<b>{{ format_ms(best_lap) }}</b></div>
+  <div class="card kv">Theoretical best<b>{{ format_ms(theoretical) }}</b>{% if theoretical and best %}<span class="{{ delta_class(theoretical - best.total_time_ms) }}">{{ format_delta(theoretical - best.total_time_ms) }} vs PB</span> · fastest segment at every gate across {{ comparable }} runs{% endif %}</div>
+</div>
+
+{% if progression | length > 1 %}
+<div class="card">
+  <div class="card-head"><h2>Progression</h2><span class="muted small">total time per finished run · gold = PB</span></div>
+  <svg id="prog-chart" class="chart" viewBox="0 0 800 240"></svg>
+</div>
+{% endif %}
+
+{% if gates %}
+<div class="card">
+  <div class="card-head"><h2>Gate consistency</h2><span class="muted small">segment time per crossing across {{ comparable }} comparable runs</span></div>
+  <svg id="gate-chart" class="chart" viewBox="0 0 800 260"></svg>
+  <table class="mono small" style="margin-top:.8rem">
+    <tr><th>Gate</th><th class="num">Best</th><th class="num">PB run</th><th class="num">Median</th><th class="num">Worst</th><th class="num">Spread</th></tr>
+    {% for g in gates %}
+    <tr><td>{{ g.label }}</td><td class="num">{{ format_ms(g.best) }}</td><td class="num {{ delta_class(g.pb - g.best) if g.pb is not none }}">{{ format_ms(g.pb) }}{% if g.pb is not none and g.pb != g.best %} <span class="small">{{ format_delta(g.pb - g.best) }}</span>{% endif %}</td><td class="num">{{ format_ms(g.median) }}</td><td class="num">{{ format_ms(g.worst) }}</td><td class="num">{{ format_ms(g.spread) }}</td></tr>
+    {% endfor %}
+  </table>
+  <p class="help">Big spread on a gate means the line there isn't settled yet; a PB-run segment far off the best means the PB has time left in it.</p>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Runs</h2>
+  <table class="stack">
+    <tr><th>When</th><th class="num">Time</th><th class="num">vs PB</th><th class="num">Laps</th><th class="num">Top km/h</th><th></th></tr>
+    {% for r in races %}
+    <tr class="{% if r.is_best %}best{% endif %}">
+      <td><a href="/races/{{ r.id }}"><time datetime="{{ utc_iso(r.started_at) }}">{{ r.started_at }}</time></a></td>
+      <td data-label="Time" class="num">{% if r.status == "finished" %}{{ format_ms(r.total_time_ms) }}{% else %}<span class="pill bad">aborted</span>{% endif %}</td>
+      <td data-label="vs PB" class="num {{ delta_class(r.total_time_ms - best.total_time_ms) if best and r.total_time_ms }}">{{ format_delta(r.total_time_ms - best.total_time_ms) if best and r.total_time_ms else "" }}</td>
+      <td data-label="Laps" class="num">{{ r.total_laps }}</td>
+      <td data-label="Top km/h" class="num">{{ format_speed(r.max_speed) }}</td>
+      <td>{% if r.is_best %}<span class="pill accent">PB</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var NS = "http://www.w3.org/2000/svg";
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function fmt(ms) { var m = Math.floor(ms / 60000), s = (ms % 60000) / 1000; return m ? m + ":" + s.toFixed(1).padStart(4, "0") : s.toFixed(1); }
+
+  var P = {{ progression | tojson }};
+  var pc = document.getElementById("prog-chart");
+  if (pc && P.length > 1) {
+    var W = 800, H = 240, L = 56, R = 14, T = 12, B = 26;
+    var vals = P.map(function (p) { return p.ms; }), vMin = Math.min.apply(null, vals), vMax = Math.max.apply(null, vals);
+    var padV = Math.max(500, (vMax - vMin) * 0.1); vMin -= padV; vMax += padV;
+    function x(i) { return L + i / (P.length - 1) * (W - L - R); } function y(v) { return T + (1 - (v - vMin) / (vMax - vMin)) * (H - T - B); }
+    for (var k = 0; k <= 4; k++) { var v = vMin + (vMax - vMin) * k / 4; el("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), class: "grid" }, pc); var lb = el("text", { x: L - 6, y: y(v) + 4, class: "label", "text-anchor": "end" }, pc); lb.textContent = fmt(Math.round(v)); }
+    var best = Math.min.apply(null, vals);
+    el("line", { x1: L, x2: W - R, y1: y(best), y2: y(best), stroke: "#f7b545", "stroke-dasharray": "4 3", "stroke-opacity": .7 }, pc);
+    // Running best.
+    var run = Infinity, rd = P.map(function (p, i) { run = Math.min(run, p.ms); return (i ? "L" : "M") + x(i).toFixed(1) + " " + y(run).toFixed(1); }).join(" ");
+    el("path", { d: rd, class: "series ref" }, pc);
+    el("path", { d: P.map(function (p, i) { return (i ? "L" : "M") + x(i).toFixed(1) + " " + y(p.ms).toFixed(1); }).join(" "), class: "series" }, pc);
+    P.forEach(function (p, i) { var c = el("circle", { cx: x(i), cy: y(p.ms), r: p.best ? 6 : 4, class: "dot" + (p.best ? " best" : "") }, pc); var t = el("title", {}, c); t.textContent = "#" + p.id + " " + fmt(p.ms); c.style.cursor = "pointer"; c.addEventListener("click", function () { location.href = "/races/" + p.id; }); });
+    var first = el("text", { x: L, y: H - 8, class: "label" }, pc); first.textContent = "first"; var last = el("text", { x: W - R, y: H - 8, class: "label", "text-anchor": "end" }, pc); last.textContent = "latest";
+  }
+
+  var G = {{ gates | tojson }};
+  var gc = document.getElementById("gate-chart");
+  if (gc && G.length) {
+    var W2 = 800, H2 = 260, L2 = 48, R2 = 10, T2 = 12, B2 = 30;
+    var worst = Math.max.apply(null, G.map(function (g) { return g.worst; })) || 1;
+    var bw = (W2 - L2 - R2) / G.length;
+    function gy(v) { return T2 + (1 - v / worst) * (H2 - T2 - B2); }
+    for (var k2 = 0; k2 <= 4; k2++) { var v2 = worst * k2 / 4; el("line", { x1: L2, x2: W2 - R2, y1: gy(v2), y2: gy(v2), class: "grid" }, gc); var l2 = el("text", { x: L2 - 6, y: gy(v2) + 4, class: "label", "text-anchor": "end" }, gc); l2.textContent = (v2 / 1000).toFixed(1); }
+    G.forEach(function (g, i) {
+      var cx = L2 + bw * i + bw / 2;
+      // Range best→worst as a thin bar, median as a tick, PB-run segment as a dot.
+      el("rect", { x: cx - bw * 0.3, y: gy(g.worst), width: bw * 0.6, height: Math.max(1, gy(g.best) - gy(g.worst)), class: "bar" }, gc);
+      el("line", { x1: cx - bw * 0.3, x2: cx + bw * 0.3, y1: gy(g.median), y2: gy(g.median), stroke: "#f7f9fb", "stroke-width": 2 }, gc);
+      if (g.pb != null) el("circle", { cx: cx, cy: gy(g.pb), r: 3.5, class: "dot best" }, gc);
+      if (G.length <= 40 || i % Math.ceil(G.length / 40) === 0) { var t = el("text", { x: cx, y: H2 - 10, class: "label", "text-anchor": "middle" }, gc); t.textContent = g.label.replace(" ", ""); }
+    });
+  }
+})();
+</script>
+{% endblock %}

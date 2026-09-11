@@ -1,0 +1,23 @@
+services:
+  splitter:
+    build:
+      context: ..
+      dockerfile: splitter/Dockerfile
+    ports:
+      - "8100:8100"
+    environment:
+      DATABASE_URL: sqlite+aiosqlite:////data/splitter.db
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+
+  # Tests/lint/typecheck run here, never on the host:
+  #   docker compose --profile dev run --rm test
+  test:
+    profiles: ["dev"]
+    build:
+      context: ..
+      dockerfile: splitter/Dockerfile.dev
+    volumes:
+      - .:/app/splitter
+    working_dir: /app/splitter

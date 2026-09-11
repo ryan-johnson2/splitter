@@ -1,0 +1,16 @@
+# Dev/test image: same base as the runtime image plus the test tooling.
+# Build from the parent directory so the sibling velocidrone-websocket is reachable:
+#   docker compose --profile dev build test
+#   docker compose --profile dev run --rm test                # pytest
+#   docker compose --profile dev run --rm test ruff check src tests
+#   docker compose --profile dev run --rm test mypy src
+FROM python:3.12-slim
+
+WORKDIR /app
+COPY velocidrone-libraries/velocidrone-websocket /app/velocidrone-websocket
+COPY splitter /app/splitter
+RUN pip install --no-cache-dir -e /app/velocidrone-websocket -e /app/splitter \
+    "pytest>=8.0" "pytest-asyncio>=0.23" "httpx>=0.27" "mypy>=1.8" "ruff>=0.3"
+
+WORKDIR /app/splitter
+CMD ["python", "-m", "pytest", "-q"]

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}{{ brand_name }} · Protocol{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Protocol log</h1>
+  <form method="get" class="actions inline-form">
+    <select name="type"><option value="">all events</option>{% for t in types %}<option value="{{ t }}" {% if t == filter.type %}selected{% endif %}>{{ t }}</option>{% endfor %}</select>
+    <input type="number" name="race" placeholder="race id" value="{{ filter.race if filter.race is not none else '' }}" style="width:7rem">
+    <button type="submit" class="btn sm">Filter</button>
+    <button type="submit" form="clear-form" class="btn sm danger" onclick="return confirm('Clear the event log?')">Clear</button>
+  </form>
+  <form method="post" action="/protocol/clear" id="clear-form"></form>
+  <p class="sub">Newest first, raw as received. <code>imu</code> is sampled to one frame every 5 s; everything else is complete.</p>
+</div>
+<div class="card">
+  {% if not events %}<p class="empty">No frames logged yet.</p>{% else %}
+  <table class="mono small">
+    <tr><th>When</th><th>Event</th><th>Race</th><th>Payload</th></tr>
+    {% for e in events %}
+    <tr><td class="muted" style="white-space:nowrap">{{ e.received_at.strftime("%H:%M:%S") }} <span class="muted">{{ e.received_at.strftime("%m-%d") }}</span></td><td><span class="pill {{ 'accent' if e.event_type in ('session', 'racestatus', 'countdown', 'racetype') else 'dim' }}">{{ e.event_type }}</span></td><td>{% if e.race_id %}<a href="/races/{{ e.race_id }}">#{{ e.race_id }}</a>{% endif %}</td><td><pre>{{ e.payload }}</pre></td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+{% endblock %}

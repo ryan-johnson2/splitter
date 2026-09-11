@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}{{ brand_name }} · Race #{{ race.id }}{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ race.track_name or "Unknown track" }} <span class="muted">#{{ race.id }}</span></h1>
+  {% if race.is_best %}<span class="pill accent">personal best</span>{% elif race.status == "aborted" %}<span class="pill bad">aborted</span>{% endif %}
+  <p class="sub"><time datetime="{{ utc_iso(race.started_at) }}">{{ race.started_at }}</time>{% if race.scenery %} · {{ race.scenery }}{% endif %}{% if race.quad_type %} · {{ race.quad_type }}{% if race.quad_size %} {{ race.quad_size }}"{% endif %}{% endif %}{% if race.race_mode %} · {{ mode_label(race.race_mode) }}{% endif %}{% if race.player_name %} · {{ race.player_name }}{% endif %}</p>
+</div>
+
+<div class="grid">
+  <div class="card kv">Total<b class="big">{{ format_ms(race.total_time_ms) if race.status == "finished" else "DNF" }}</b>
+    {% if race.pb_delta_ms is not none %}<span class="{{ delta_class(race.pb_delta_ms) }}">{{ format_delta(race.pb_delta_ms) }} vs PB at the time</span>{% elif reference %}<span class="{{ delta_class(reference.total_delta(race.total_time_ms)) if race.total_time_ms }}">{{ format_delta(reference.total_delta(race.total_time_ms)) if race.total_time_ms else "" }} vs current PB</span>{% endif %}</div>
+  <div class="card kv">Laps<b>{{ race.total_laps }}{% if race.race_laps %} / {{ race.race_laps }}{% endif %}</b>{{ race.gates_per_lap or "?" }} gates per lap</div>
+  <div class="card kv">Best lap<b>{{ format_ms(race.laps | map(attribute="lap_ms") | min) if race.laps else "--" }}</b></div>
+  <div class="card kv">Top speed<b>{{ format_speed(race.max_speed) }} <span class="muted small">km/h</span></b>{% if race.avg_speed %}avg {{ format_speed(race.avg_speed) }} · {{ "%.0f" | format(race.distance_m or 0) }} m{% endif %}</div>
+</div>
+
+{% if telemetry %}
+<div class="card">
+  <div class="card-head"><h2>Flight path</h2><span class="muted small">top-down, {{ race.telemetry_samples }} samples · colour = speed</span></div>
+  <svg id="path-chart" class="chart" viewBox="0 0 800 420"></svg>
+</div>
+<div class="card">
+  <div class="card-head"><h2>Speed</h2><span class="muted small">km/h over race time · ticks = gates</span></div>
+  <svg id="speed-chart" class="chart" viewBox="0 0 800 220"></svg>
+</div>
+{% endif %}
+
+<div class="live-grid">
+  <div class="card">
+    <h2>Laps</h2>
+    {% if not lap_rows %}<p class="empty">No completed laps.</p>{% else %}
+    <table class="mono">
+      <tr><th>Lap</th><th class="num">Time</th><th class="num">vs PB then</th><th class="num">vs PB now</th><th class="num">Gates</th><th class="num">Top km/h</th></tr>
+      {% for row in lap_rows %}{% set l = row.lap %}
+      <tr><td>{{ l.lap }}</td><td class="num">{{ format_ms(l.lap_ms) }}</td><td class="num {{ delta_class(l.delta_ms) }}">{{ format_delta(l.delta_ms) }}</td><td class="num {{ delta_class(row.vs_best) }}">{{ format_delta(row.vs_best) }}</td><td class="num">{{ l.gates }}</td><td class="num">{{ format_speed(l.max_speed) }}</td></tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+    {% if best and best.id != race.id %}<p class="help">Current PB is <a href="/races/{{ best.id }}">#{{ best.id }}</a> at {{ format_ms(best.total_time_ms) }}.</p>{% endif %}
+  </div>
+  <div class="card">
+    <h2>Gates</h2>
+    {% if not gate_rows %}<p class="empty">No gate crossings recorded.</p>{% else %}
+    <div class="gate-log"><table class="mono">
+      <tr><th>#</th><th>Lap</th><th>Gate</th><th class="num">Segment</th><th class="num">seg vs PB</th><th class="num">Race</th><th class="num">vs PB</th><th class="num">km/h</th></tr>
+      {% for row in gate_rows %}{% set g = row.g %}
+      <tr class="{% if g.ends_lap %}lap-end{% endif %}"><td class="muted">{{ g.seq + 1 }}</td><td>{{ g.lap }}</td><td>{{ g.gate }}{% if g.ends_lap %} <span class="muted small">ends L{{ g.ends_lap }}</span>{% endif %}</td><td class="num">{{ format_ms(g.gate_ms) }}</td><td class="num {{ delta_class(row.seg_vs_best) }}">{{ format_delta(row.seg_vs_best) }}</td><td class="num">{{ format_ms(g.cumulative_ms) }}</td><td class="num {{ delta_class(row.vs_best) }}">{{ format_delta(row.vs_best) }}</td><td class="num">{{ format_speed(g.max_speed) }}</td></tr>
+      {% endfor %}
+    </table></div>
+    {% endif %}
+  </div>
+</div>
+
+<details>
+  <summary>Edit</summary>
+  <form method="post" action="/races/{{ race.id }}/edit" class="form" style="margin-top:.6rem">
+    <div class="row">
+      <div class="field"><label>Track</label><input name="track_name" value="{{ race.track_name }}"></div>
+      <div class="field"><label>Scenery</label><input name="scenery" value="{{ race.scenery }}"></div>
+    </div>
+    <div class="row three">
+      <div class="field"><label>Quad</label><input name="quad_type" value="{{ race.quad_type }}"></div>
+      <div class="field"><label>Size</label><input name="quad_size" value="{{ race.quad_size }}"></div>
+      <div class="field"><label>Race laps</label><input type="number" name="race_laps" value="{{ race.race_laps }}" min="0"></div>
+    </div>
+    <div class="field"><label>Notes</label><textarea name="notes">{{ race.notes }}</textarea></div>
+    <div class="form-actions">
+      <button type="submit" class="primary">Save</button>
+      <button type="submit" form="delete-form" class="danger" onclick="return confirm('Delete this race?')">Delete race</button>
+    </div>
+  </form>
+  <form method="post" action="/races/{{ race.id }}/delete" id="delete-form"></form>
+</details>
+{% endblock %}
+{% block scripts %}
+{% if telemetry %}
+<script>
+(function () {
+  var T = {{ telemetry | tojson }}, G = {{ gate_marks | tojson }};
+  var NS = "http://www.w3.org/2000/svg";
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function speedColor(v, max) { var t = max ? Math.min(1, v / max) : 0; var h = 160 - 160 * t; return "hsl(" + h + " 80% 55%)"; }
+  var maxSpeed = Math.max.apply(null, T.map(function (s) { return s[4]; })) || 1;
+
+  // Top-down path: x → x, z → y (Unity y is up).
+  var svg = document.getElementById("path-chart"), W = 800, H = 420, pad = 20;
+  var xs = T.map(function (s) { return s[1]; }), zs = T.map(function (s) { return s[3]; });
+  var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs), minZ = Math.min.apply(null, zs), maxZ = Math.max.apply(null, zs);
+  var span = Math.max(maxX - minX, maxZ - minZ) || 1, scale = (Math.min(W, H) - 2 * pad) / span;
+  var ox = (W - (maxX - minX) * scale) / 2, oz = (H - (maxZ - minZ) * scale) / 2;
+  function px(s) { return ox + (s[1] - minX) * scale; } function py(s) { return H - (oz + (s[3] - minZ) * scale); }
+  for (var i = 1; i < T.length; i++) {
+    el("line", { x1: px(T[i - 1]), y1: py(T[i - 1]), x2: px(T[i]), y2: py(T[i]), stroke: speedColor(T[i][4], maxSpeed), "stroke-width": 2.5, "stroke-linecap": "round" }, svg);
+  }
+  if (T.length) { el("circle", { cx: px(T[0]), cy: py(T[0]), r: 5, fill: "#f7f9fb" }, svg); }
+  // Gate markers at the sample nearest each crossing time.
+  G.forEach(function (g) {
+    var best = null, bd = Infinity;
+    T.forEach(function (s) { var d = Math.abs(s[0] - g[0]); if (d < bd) { bd = d; best = s; } });
+    if (!best || bd > 400) return;
+    el("circle", { cx: px(best), cy: py(best), r: 4, class: "gate" }, svg);
+    var t = el("text", { x: px(best) + 6, y: py(best) - 6, class: "label" }, svg); t.textContent = "L" + g[1] + "G" + g[2];
+  });
+  var lg = el("text", { x: W - pad, y: H - 6, class: "label", "text-anchor": "end" }, svg); lg.textContent = "max " + Math.round(maxSpeed * 3.6) + " km/h";
+
+  // Speed over time.
+  var sc = document.getElementById("speed-chart"), SW = 800, SH = 220, L = 42, B = 24, R = 10, Tp = 10;
+  var tMax = T[T.length - 1][0] || 1, vMax = Math.ceil(maxSpeed * 3.6 / 20) * 20 || 20;
+  function sx(t) { return L + (t / tMax) * (SW - L - R); } function sy(v) { return Tp + (1 - v / vMax) * (SH - Tp - B); }
+  for (var v = 0; v <= vMax; v += vMax / 4) { el("line", { x1: L, x2: SW - R, y1: sy(v), y2: sy(v), class: "grid" }, sc); var lb = el("text", { x: L - 6, y: sy(v) + 4, class: "label", "text-anchor": "end" }, sc); lb.textContent = Math.round(v); }
+  G.forEach(function (g) { el("line", { x1: sx(g[0]), x2: sx(g[0]), y1: Tp, y2: SH - B, stroke: "#f7b545", "stroke-opacity": .5 }, sc); });
+  var d = T.map(function (s, i) { return (i ? "L" : "M") + sx(s[0]).toFixed(1) + " " + sy(s[4] * 3.6).toFixed(1); }).join(" ");
+  el("path", { d: d, class: "series" }, sc);
+  for (var t = 0; t <= tMax; t += Math.max(5000, Math.round(tMax / 8 / 5000) * 5000)) { var tl = el("text", { x: sx(t), y: SH - 6, class: "label", "text-anchor": "middle" }, sc); tl.textContent = (t / 1000).toFixed(0) + "s"; }
+})();
+</script>
+{% endif %}
+{% endblock %}

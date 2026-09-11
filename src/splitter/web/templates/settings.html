@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}{{ brand_name }} · Settings{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Settings</h1><p class="sub">Changes apply immediately, no restart needed.</p></div>
+
+<form method="post" action="/settings" class="stack">
+<div class="card">
+  <h2>Game PC</h2>
+  <p class="help">VelociDrone listens on its <b>LAN IP</b>, port 60003 — never on localhost. Enable <i>Options → Main Settings → Websocket Communication</i> in the game (and <i>Websocket IMU</i> for telemetry).</p>
+  <div class="row" style="margin-top:.8rem">
+    <div class="field"><label for="game_host">Game PC address</label><input id="game_host" name="game_host" value="{{ values.game_host }}" placeholder="192.168.1.50"></div>
+    <div class="field"><label for="game_port">Port</label><input id="game_port" name="game_port" type="number" value="{{ values.game_port }}" min="1" max="65535"></div>
+  </div>
+  <div class="field"><label for="player_name">Your player name</label><input id="player_name" name="player_name" value="{{ values.player_name }}" placeholder="learned automatically when alone in the race"><p class="help">Only needed when other pilots are in the room, so Splitter knows which entry is you.</p></div>
+  <div class="field"><label class="switch"><input type="hidden" name="auto_connect" value="0"><input type="checkbox" name="auto_connect" value="1" {% if values.auto_connect == "1" %}checked{% endif %}> Connect automatically at startup</label></div>
+  <p class="small">Status: <span class="pill {{ 'ok' if bridge.connected else 'warn' if bridge.state in ('connecting', 'reconnecting') else 'dim' }}">{{ bridge.state }}</span>
+    {% if bridge.last_error %}<span class="muted">{{ bridge.last_error }}</span>{% endif %}
+    {% if bridge.events_received %}· {{ bridge.events_received }} frames received{% endif %}
+    {% if controller.imu_frames %}· {{ controller.imu_frames }} IMU frames{% endif %}</p>
+</div>
+
+<div class="card">
+  <h2>Telemetry</h2>
+  <p class="help">With IMU enabled in the game, Splitter gets position, velocity and gyro rates at 60 Hz for your own drone. Per-gate speed and distance are always computed from the full stream; this controls what is <b>stored</b> per race for the flight-path and speed views.</p>
+  <div class="field" style="margin-top:.8rem"><label class="switch"><input type="hidden" name="telemetry_enabled" value="0"><input type="checkbox" name="telemetry_enabled" value="1" {% if values.telemetry_enabled == "1" %}checked{% endif %}> Record telemetry</label></div>
+  <div class="field inline"><label for="telemetry_store_hz">Store</label><input id="telemetry_store_hz" name="telemetry_store_hz" type="number" min="1" max="60" value="{{ values.telemetry_store_hz }}" style="width:5rem"> <span class="muted">samples per second (60 = everything, ~1 MB per race; 20 is plenty for a path)</span></div>
+</div>
+
+<div class="card">
+  <h2>Protocol log</h2>
+  <p class="help">Keeps the raw frames the game sends (IMU sampled to one every 5 s) so you can see exactly what arrives — e.g. what Nemesis mode emits. Browse it under <a href="/protocol">Protocol</a>.</p>
+  <div class="field" style="margin-top:.8rem"><label class="switch"><input type="hidden" name="event_log_enabled" value="0"><input type="checkbox" name="event_log_enabled" value="1" {% if values.event_log_enabled == "1" %}checked{% endif %}> Log raw frames</label></div>
+  <div class="field inline"><label for="event_log_keep">Keep the newest</label><input id="event_log_keep" name="event_log_keep" type="number" min="100" value="{{ values.event_log_keep }}" style="width:7rem"> <span class="muted">frames</span></div>
+</div>
+
+<div class="card">
+  <h2>About</h2>
+  <div class="field"><label for="brand_name">Name in the header</label><input id="brand_name" name="brand_name" value="{{ values.brand_name }}"></div>
+  <p class="small muted">{{ brand_name }} v{{ app_version }}</p>
+</div>
+
+<div class="form-actions"><button type="submit" class="primary">Save settings</button></div>
+</form>
+{% endblock %}

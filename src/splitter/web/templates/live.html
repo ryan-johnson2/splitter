@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}{{ brand_name }} · Live{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<div class="state-banner" id="banner">
+  <span class="pill dim" id="phase">idle</span>
+  <span class="session" id="session-line">—</span>
+  <span class="actions">
+    <button type="button" class="btn sm" id="btn-session">Track…</button>
+    <button type="button" class="btn sm" id="btn-reconnect" title="reconnect to the game">↻</button>
+  </span>
+</div>
+
+<div id="view-countdown" hidden><div class="countdown" id="countdown">3</div></div>
+
+<div class="live-grid">
+  <div>
+    <div class="card" id="race-card">
+      <div class="big-time" id="race-time">0.000</div>
+      <div class="big-time lap" id="lap-time">0.000</div>
+      <div class="big-delta" id="split">&nbsp;</div>
+      <div class="stat-row">
+        <div class="stat">Lap<b id="lap-no">–</b></div>
+        <div class="stat">Gate<b id="gate-no">–</b></div>
+        <div class="stat">Last gate<b id="last-gate">–</b></div>
+        <div class="stat">Last lap<b id="last-lap">–</b></div>
+        <div class="stat">vs PB lap<b id="last-lap-delta">–</b></div>
+        <div class="stat">Speed <span class="muted">km/h</span><b id="speed">–</b><span class="speed-bar"><i id="speed-bar"></i></span></div>
+      </div>
+      <p class="help" id="ref-line">&nbsp;</p>
+    </div>
+
+    <div class="card result-card" id="result-card" hidden>
+      <div class="card-head"><h2 id="result-title">Result</h2><span class="actions"><a class="btn sm" id="result-link" href="#">details</a></span></div>
+      <div class="result-total" id="result-total">–</div>
+      <div id="result-delta" class="big-delta" style="font-size:1.6rem">&nbsp;</div>
+      <div class="laps-inline" id="result-laps"></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card gate-log">
+      <div class="card-head"><h2>Gate log</h2><span class="live"><span class="dot"></span> <span id="ws-state">connecting</span></span></div>
+      <table class="mono" id="gate-table">
+        <thead><tr><th>Lap</th><th>Gate</th><th class="num">Gate</th><th class="num">vs PB</th><th class="num">Race</th><th class="num">km/h</th></tr></thead>
+        <tbody id="gate-rows"><tr><td colspan="6" class="empty">Waiting for a race…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<dialog id="session-dialog">
+  <h2>Track &amp; quad</h2>
+  <p class="help">Single player never tells Splitter the track. Set it here once; it sticks until the game sends a session (hosting a room) or you change it.</p>
+  <form id="session-form" class="form" style="margin-top:1rem">
+    <div class="field"><label for="f-track">Track</label><input id="f-track" name="track_name" required list="track-list"><datalist id="track-list"></datalist></div>
+    <div class="row">
+      <div class="field"><label for="f-scenery">Scenery</label><input id="f-scenery" name="scenery"></div>
+      <div class="field"><label for="f-laps">Laps</label><input id="f-laps" name="race_laps" type="number" min="0" max="99"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label for="f-quad">Quad</label><input id="f-quad" name="quad_type" list="quad-list"><datalist id="quad-list"></datalist></div>
+      <div class="field"><label for="f-size">Size</label><input id="f-size" name="quad_size" placeholder="5"></div>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="primary">Save</button>
+      <button type="button" class="btn" id="session-cancel">Cancel</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast-wrap" id="toasts"></div>
+{% endblock %}
+{% block scripts %}
+<script>window.SPLITTER_SNAPSHOT = {{ snapshot | tojson }};</script>
+<script src="/static/live.js"></script>
+{% endblock %}
