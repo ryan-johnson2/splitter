@@ -59,6 +59,10 @@ IMU* for telemetry). The header dot goes green when the game is reachable.
 
 Health: `/healthz`. Logs: `journalctl -u splitter -f`.
 
+To serve on port 80 instead of 8100 (it is the only service on the box), set
+`PORT=80` in `/etc/splitter/splitter.env` and restart; the unit carries
+`CAP_NET_BIND_SERVICE` so the unprivileged `splitter` user may bind it.
+
 ## 4. Upgrades
 
 Re-running the installer is the upgrade. It keeps the env file and database,
