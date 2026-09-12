@@ -301,6 +301,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read  # gh run download lists this run's artifacts
     env:
       KIND: ${{ needs.stamp.outputs.kind }}
       TAG: ${{ needs.stamp.outputs.tag }}
@@ -320,6 +321,7 @@ jobs:
             if gh run download "${{ github.run_id }}" --dir assets --pattern "splitter-*"; then break; fi
             echo "download attempt $attempt failed; retrying in 20 s"; sleep 20
           done
+          test -d assets || { echo "::error::could not download the run's artifacts"; exit 1; }
           find assets -type f | sort
       - name: Flatten and checksum
         run: |
