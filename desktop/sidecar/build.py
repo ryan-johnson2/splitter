@@ -45,6 +45,8 @@ def main() -> None:
     ap.add_argument("--skip-install", action="store_true")
     args = ap.parse_args()
 
+    stamp = os.environ.get("SPLITTER_BUILD", "").strip()
+    run(PY, str(ROOT / "scripts" / "stamp.py"), "--write", *(["--stamp", stamp] if stamp else []))
     if not args.skip_install:
         pip("pyinstaller>=6.10")
         pip(str(ROOT / "libs" / "velocidrone-ws"), str(ROOT))

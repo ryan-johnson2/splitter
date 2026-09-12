@@ -7,8 +7,46 @@
 //! `SPLITTER_ALLOW_EMPTY_SIDECAR=1` (for `cargo check` without a Python build).
 
 use std::path::PathBuf;
+use std::process::Command;
+
+/// Same rule as scripts/stamp.py: SPLITTER_BUILD env, else a clean v* tag, else
+/// <pkg>-dev-<hash>[-dirty], else the package version.
+fn build_stamp(pkg: &str) -> String {
+    if let Ok(v) = std::env::var("SPLITTER_BUILD") {
+        if !v.trim().is_empty() {
+            return v.trim().trim_start_matches('v').to_string();
+        }
+    }
+    let dirty = git(&["status", "--porcelain"]).is_some();
+    if !dirty {
+        if let Some(tag) = git(&["describe", "--exact-match", "--tags", "--match", "v*", "HEAD"]) {
+            return tag.trim_start_matches('v').to_string();
+        }
+    }
+    let Some(hash) = git(&["rev-parse", "--short=7", "HEAD"]) else {
+        return pkg.to_string();
+    };
+    let base = pkg.split('-').next().unwrap_or(pkg);
+    format!("{base}-dev-{hash}{}", if dirty { "-dirty" } else { "" })
+}
+
+fn git(args: &[&str]) -> Option<String> {
+    let out = Command::new("git").args(args).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8(out.stdout).ok()?;
+    let s = s.trim();
+    (!s.is_empty()).then(|| s.to_string())
+}
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=SPLITTER_BUILD");
+    println!("cargo:rerun-if-changed=../../.git/HEAD");
+    println!("cargo:rerun-if-changed=../../.git/index");
+    let pkg = std::env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION");
+    println!("cargo:rustc-env=SPLITTER_BUILD={}", build_stamp(&pkg));
+
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     let default = {
         let name = if cfg!(windows) { "splitter-sidecar.exe" } else { "splitter-sidecar" };

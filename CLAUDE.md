@@ -144,8 +144,11 @@ with PyInstaller (`--tracks … --protect` Cython-compiles the private client in
 it into a portable `splitter-data/` folder beside the exe, spawns it and opens a
 window at its `SPLITTER_READY` URL (`splitter/desktop_entry.py`). Config reads
 `SPLITTER_DATA_DIR` for the SQLite location. `.github/workflows/release-builds.yml`
-builds all of it on a `v*` tag (or on demand): portable exe per OS, LXC bundle,
-GHCR image, GitHub Release. Secret `LIBRARIES_TOKEN` (read access to
+builds all of it on a `v*` tag, a `dev-*` tag, or on demand (publish=dev cuts a
+`dev-<date>` tag): portable exe per OS, LXC bundle, GHCR image, GitHub Release
+(prerelease for dev). Versions come from the build stamp (`scripts/stamp.py`:
+clean v-tag → its version, else `<base>-dev-<hash>`; written to the gitignored
+`splitter/_stamp.py` at build time and read by `version.py`). Secret `LIBRARIES_TOKEN` (read access to
 velocidrone-libraries) is what makes the online picker part of a build. Do not
 touch the user's running Docker container while working on release plumbing
 unless asked.

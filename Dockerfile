@@ -5,13 +5,18 @@
 # Cython-compiled in the builder stage so the image carries no readable source
 # for it.
 FROM python:3.12-slim AS builder
+# The build stamp (scripts/stamp.py): pass --build-arg SPLITTER_BUILD=$(python scripts/stamp.py).
+# The image context has no .git, so an empty arg means "pyproject version".
+ARG SPLITTER_BUILD=""
 WORKDIR /app
 COPY libs/velocidrone-ws /app/libs/velocidrone-ws
 COPY pyproject.toml README.md /app/
 COPY src /app/src
+COPY scripts/stamp.py /app/scripts/stamp.py
 COPY desktop/sidecar/protect.py /app/protect.py
 COPY wheels* /app/wheels/
-RUN pip install --no-cache-dir /app/libs/velocidrone-ws /app \
+RUN python /app/scripts/stamp.py --write --stamp "$SPLITTER_BUILD" \
+    && pip install --no-cache-dir /app/libs/velocidrone-ws /app \
     && if ls /app/wheels/velocidrone_tracks-*.whl >/dev/null 2>&1; then \
          apt-get update -qq && apt-get install -y -qq --no-install-recommends gcc libc6-dev >/dev/null \
          && pip install --no-cache-dir /app/wheels/velocidrone_tracks-*.whl \

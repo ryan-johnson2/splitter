@@ -67,3 +67,8 @@ asyncio_mode = "auto"
 # Optional online track client (private packages, not in this repo).
 module = ["velocidrone_tracks", "velocidrone_tracks.*", "velocidrone_api", "velocidrone_api.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Generated at build time by scripts/stamp.py; absent in a checkout.
+module = ["splitter._stamp"]
+ignore_missing_imports = true

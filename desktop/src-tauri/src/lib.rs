@@ -77,7 +77,7 @@ pub fn run() {
             open_log(&data_dir);
             log(format!(
                 "Splitter {} starting — data dir {}",
-                env!("CARGO_PKG_VERSION"),
+                env!("SPLITTER_BUILD"),
                 data_dir.display()
             ));
 
@@ -146,7 +146,7 @@ fn extract_sidecar(data_dir: &Path) -> Result<PathBuf, Box<dyn std::error::Error
     fs::create_dir_all(&bin_dir)?;
     let name = format!(
         "splitter-sidecar-{}{}",
-        env!("CARGO_PKG_VERSION"),
+        env!("SPLITTER_BUILD"),
         if cfg!(windows) { ".exe" } else { "" }
     );
     let path = bin_dir.join(name);

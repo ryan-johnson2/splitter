@@ -13,3 +13,4 @@ desktop/sidecar/build/
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
 *.spec.bak
+src/splitter/_stamp.py

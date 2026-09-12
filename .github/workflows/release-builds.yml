@@ -7,7 +7,12 @@ name: Release builds
 #   - the Docker image on GHCR
 # and, on a v* tag, a GitHub Release carrying all of them.
 #
-# Runs only on demand or on a version tag — never on plain pushes.
+# Runs only on demand or on a tag — never on plain pushes. Naming follows GridFPV:
+#   v1.2.3        → a release; every artifact reports "1.2.3"
+#   dev-YYYY-MM-DD[b|c…] → a *prerelease* "Dev build YYYY-MM-DD…"; artifacts report
+#                   "<base>-dev-<short hash>" (scripts/stamp.py) — a release names
+#                   itself, everything else names its commit.
+# A manual run with publish=dev cuts the next free dev-<today> tag itself.
 #
 # Secrets:
 #   LIBRARIES_TOKEN  read access to ryan-johnson2/velocidrone-libraries. Optional:
@@ -16,8 +21,18 @@ name: Release builds
 #                    every artifact still builds, with manual track ids only.
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish this run as a dev prerelease (creates a dev-YYYY-MM-DD tag)"
+        type: choice
+        options: [none, dev]
+        default: none
+      notes:
+        description: "Short note for the dev release title, e.g. 'field fixes'"
+        type: string
+        default: ""
   push:
-    tags: ["v*"]
+    tags: ["v*", "dev-*"]
 
 concurrency:
   group: release-builds-${{ github.ref }}
@@ -29,9 +44,53 @@ env:
   HAVE_TOKEN: ${{ secrets.LIBRARIES_TOKEN != '' }}
 
 jobs:
+  stamp:
+    name: Build stamp / dev tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      stamp: ${{ steps.stamp.outputs.stamp }}
+      tag: ${{ steps.stamp.outputs.tag }}
+      kind: ${{ steps.stamp.outputs.kind }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - id: stamp
+        shell: bash
+        env:
+          PUBLISH: ${{ github.event.inputs.publish }}
+        run: |
+          set -euo pipefail
+          KIND=none; TAG=""
+          case "${GITHUB_REF}" in
+            refs/tags/v*)   KIND=release; TAG="${GITHUB_REF_NAME}" ;;
+            refs/tags/dev-*) KIND=dev;     TAG="${GITHUB_REF_NAME}" ;;
+          esac
+          if [ "$KIND" = none ] && [ "${PUBLISH:-none}" = dev ]; then
+            # Next free dev-<today>[b,c,…] tag, GridFPV style.
+            base="dev-$(date -u +%Y-%m-%d)"; TAG="$base"; n=0
+            while git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; do
+              n=$((n+1)); TAG="$base$(printf "\x$(printf %x $((97+n)))")"
+            done
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "Dev build $TAG"
+            git push origin "$TAG"
+            KIND=dev
+          fi
+          STAMP="$(python3 scripts/stamp.py)"
+          echo "stamp=$STAMP" >> "$GITHUB_OUTPUT"; echo "tag=$TAG" >> "$GITHUB_OUTPUT"; echo "kind=$KIND" >> "$GITHUB_OUTPUT"
+          echo "build stamp: $STAMP (kind=$KIND tag=$TAG)"
+
   desktop:
     name: ${{ matrix.os }} — portable desktop app
+    needs: stamp
     runs-on: ${{ matrix.os }}
+    env:
+      SPLITTER_BUILD: ${{ needs.stamp.outputs.stamp }}
     strategy:
       fail-fast: false
       matrix:
@@ -79,7 +138,7 @@ jobs:
         shell: bash
         run: |
           TRACKS=""; [ -d _libraries/velocidrone-tracks ] && TRACKS="--tracks /w/_libraries/velocidrone-tracks --protect"
-          docker run --rm -v "$PWD:/w" -w /w -e HOME=/tmp python:3.12-bullseye \
+          docker run --rm -v "$PWD:/w" -w /w -e HOME=/tmp -e SPLITTER_BUILD python:3.12-bullseye \
             python desktop/sidecar/build.py $TRACKS
           sudo chown -R "$(id -u):$(id -g)" desktop/sidecar
           rm -rf _libraries
@@ -150,6 +209,7 @@ jobs:
           mkdir -p out
           ext=""; [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
           cp "${{ matrix.binary }}" "out/${{ matrix.artifact }}${ext}"
+          echo "$SPLITTER_BUILD" > "out/BUILD-${{ matrix.artifact }}.txt"
           ls -la out
       - uses: actions/upload-artifact@v4
         with:
@@ -159,7 +219,10 @@ jobs:
 
   server:
     name: Server — LXC bundle + Docker image
+    needs: stamp
     runs-on: ubuntu-latest
+    env:
+      SPLITTER_BUILD: ${{ needs.stamp.outputs.stamp }}
     permissions:
       contents: read
       packages: write
@@ -211,13 +274,17 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=latest,enable=${{ needs.stamp.outputs.kind == 'release' }}
+            type=raw,value=${{ needs.stamp.outputs.tag }},enable=${{ needs.stamp.outputs.kind == 'dev' }}
+            type=raw,value=edge,enable=${{ needs.stamp.outputs.kind == 'dev' }}
             type=sha
       - name: Build and push the image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
+          build-args: |
+            SPLITTER_BUILD=${{ env.SPLITTER_BUILD }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -225,11 +292,16 @@ jobs:
 
   release:
     name: GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [desktop, server]
+    if: needs.stamp.outputs.kind != 'none'
+    needs: [stamp, desktop, server]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      KIND: ${{ needs.stamp.outputs.kind }}
+      TAG: ${{ needs.stamp.outputs.tag }}
+      STAMP: ${{ needs.stamp.outputs.stamp }}
+      NOTES: ${{ github.event.inputs.notes }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -238,15 +310,31 @@ jobs:
         run: |
           mkdir -p out
           find assets -type f -exec cp {} out/ \;
+          rm -f out/BUILD-*.txt; echo "$STAMP" > out/BUILD.txt
           (cd out && sha256sum * > SHA256SUMS.txt && ls -la)
+      - name: Release title
+        id: title
+        shell: bash
+        run: |
+          if [ "$KIND" = release ]; then
+            echo "name=Splitter ${TAG#v}" >> "$GITHUB_OUTPUT"
+          else
+            d="${TAG#dev-}"; [ -n "$NOTES" ] && d="$d ($NOTES)"
+            echo "name=Dev build $d" >> "$GITHUB_OUTPUT"
+          fi
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.TAG }}
+          name: ${{ steps.title.outputs.name }}
+          prerelease: ${{ env.KIND == 'dev' }}
           files: out/*
           generate_release_notes: true
           body: |
+            Build stamp: `${{ env.STAMP }}` (what every artifact reports as its version).
+
             **Desktop (portable, no install):** download the file for your OS and run it. It keeps
             its data in a `splitter-data` folder next to the executable. Windows SmartScreen and
             macOS Gatekeeper will warn once because the binaries are unsigned.
 
-            **Self-hosting:** `splitter-lxc-<version>.tar.gz` (Proxmox LXC / any systemd host, see
-            `deploy/lxc/README.md`) or the Docker image `ghcr.io/${{ github.repository }}:${{ github.ref_name }}`.
+            **Self-hosting:** `splitter-lxc-${{ env.STAMP }}.tar.gz` (Proxmox LXC / any systemd host, see
+            `deploy/lxc/README.md`) or the Docker image `ghcr.io/${{ github.repository }}:${{ env.TAG }}`.

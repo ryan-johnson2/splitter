@@ -45,3 +45,22 @@ built inside a `python:3.12-bullseye` container so it links against glibc 2.31
 build is not possible because the bundled C extensions are shared objects, and
 the manylinux interpreters lack the shared libpython PyInstaller needs. The shell needs
 WebKitGTK 4.1 installed on the target machine.
+
+## Versions and dev builds
+
+Every artifact reports a **build stamp** (`scripts/stamp.py`, GridFPV's rule):
+a build made from a clean `v1.2.3` tag reports `1.2.3`; anything else reports
+`<base>-dev-<short hash>` (`-dirty` if the tree had changes). It shows in the
+page footer, `/healthz` and the desktop log.
+
+Releases and dev builds are both tags:
+
+```
+git tag v0.2.0 && git push origin v0.2.0        # release: "Splitter 0.2.0", image :latest
+git tag dev-2026-09-13 && git push origin dev-2026-09-13   # prerelease: "Dev build 2026-09-13"
+```
+
+Or run *Release builds* from the Actions tab with **publish = dev** and a short
+note; it cuts the next free `dev-<today>[b,c…]` tag itself and publishes a
+prerelease titled `Dev build <date> (<note>)`. Docker images for dev builds are
+tagged with the dev tag and `edge`.

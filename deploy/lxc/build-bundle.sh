@@ -70,6 +70,8 @@ elif compgen -G "$REPO_ROOT/wheels/velocidrone_tracks-*.whl" >/dev/null; then
 else
     say "velocidrone-tracks not available — bundle will have no online track picker"
 fi
+STAMP="$(python3 "$REPO_ROOT/scripts/stamp.py" --write ${SPLITTER_BUILD:+--stamp "$SPLITTER_BUILD"})"
+say "build stamp: $STAMP"
 say "building splitter wheel"
 build_wheel "$REPO_ROOT"
 
@@ -87,13 +89,14 @@ print(re.search(r'^version\s*=\s*"([^"]+)"', text, re.M).group(1))
 PY
 )"
 
-BUNDLE="$DIST/splitter-lxc-$VERSION.tar.gz"
+echo "$STAMP" > "$DIST/BUILD.txt"
+BUNDLE="$DIST/splitter-lxc-$STAMP.tar.gz"
 tar -czf "$BUNDLE" -C "$DIST" \
-    --transform "s,^,splitter-lxc-$VERSION/," \
-    install.sh splitter.service splitter.env.example \
+    --transform "s,^,splitter-lxc-$STAMP/," \
+    install.sh splitter.service splitter.env.example BUILD.txt \
     $(cd "$DIST" && ls ./*.whl | sed 's,^\./,,')
 
 say "bundle ready: $BUNDLE"
 echo
 echo "Copy it to the container and run:"
-echo "    tar xzf splitter-lxc-$VERSION.tar.gz && cd splitter-lxc-$VERSION && ./install.sh"
+echo "    tar xzf splitter-lxc-$STAMP.tar.gz && cd splitter-lxc-$STAMP && ./install.sh"
