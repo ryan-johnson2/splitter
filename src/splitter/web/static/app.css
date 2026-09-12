@@ -137,10 +137,25 @@ details[open] summary { margin-bottom:.6rem; }
 .big-delta { font-size:clamp(2.2rem, 8vw, 4.5rem); font-weight:700; line-height:1.1; font-variant-numeric:tabular-nums; }
 .stat-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(100px, 1fr)); gap:.8rem 1rem; margin-top:1rem; }
 #ref-line { margin-top:.8rem; }
-/* Fullscreen on a tablet. Plain fullscreen keeps the header; "focus" mode
-   (html.focus) hides it so the race card gets the whole screen. */
-:fullscreen.focus header#top { display:none; }
-:fullscreen.focus main { padding-top:.6rem; }
+/* Pace vs PB at the last gate (#2): the race clock takes the colour. */
+.big-time.pace-ahead { color:var(--ok); }
+.big-time.pace-close { color:var(--warn); }
+.big-time.pace-behind { color:var(--bad); }
+
+/* "Focus" mode (html.focus): header hidden, whether via the Fullscreen API or
+   installed as an app. While a run is in progress (html.racing, #3) the race
+   card owns the screen and the clock scales up; between runs the result card
+   and the gate log come back for review. */
+html.focus header#top { display:none; }
+html.focus main { padding-top:.6rem; }
+html.focus.racing .live-grid { grid-template-columns:1fr; }
+html.focus.racing .live-grid > div:last-child, html.focus.racing #result-card { display:none; }
+html.focus.racing .big-time { font-size:clamp(4rem, 24vw, 15rem); }
+html.focus.racing .big-time.lap { font-size:clamp(2.4rem, 11vw, 6rem); }
+html.focus.racing .big-delta { font-size:clamp(2.6rem, 12vw, 7rem); }
+html.focus.racing .stat-row { grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:1rem 1.4rem; }
+html.focus.racing .stat b { font-size:clamp(1.4rem, 3.6vw, 2.6rem); }
+html.focus.racing #race-card { min-height:calc(100vh - 8rem); display:flex; flex-direction:column; justify-content:center; }
 .stat { color:var(--dim); font-size:.78rem; text-transform:uppercase; letter-spacing:.04em; }
 .stat b { display:block; color:var(--fg); font-size:1.5rem; font-variant-numeric:tabular-nums; text-transform:none; letter-spacing:0; }
 .state-banner { display:flex; align-items:center; gap:.8rem; padding:.7rem 1rem; border-radius:8px; background:var(--card2); border:1px solid var(--line); margin-bottom:1rem; flex-wrap:wrap; }
@@ -208,6 +223,10 @@ dialog::backdrop { background:rgba(0,0,0,.6); }
 .picker-row .meta { font-size:.85rem; opacity:.8; }
 .picked { margin:-.4rem 0 1rem; font-size:.9rem; }
 details.aborted-runs { margin-top:-.4rem; margin-bottom:1.2rem; }
+td.sel { white-space:nowrap; }
+td.sel .since { border:0; background:transparent; color:var(--dim); cursor:pointer; padding:0 .3rem; font-size:1rem; }
+td.sel .since:hover { color:var(--accent); }
+#bulk summary .pill { margin-left:.4rem; }
 details.aborted-runs table { margin-top:.2rem; }
 /* Installed as an app (standalone/fullscreen display mode): the browser's own
    chrome is gone, so the plain-fullscreen button is redundant; focus stays. */

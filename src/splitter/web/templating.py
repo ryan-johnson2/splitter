@@ -23,6 +23,7 @@ def _site_context(request: Any) -> dict[str, Any]:
         "app_version": __version__,
         "game_connected": bool(bridge and bridge.connected),
         "time_format": style,
+        "pace_yellow_s": settings.get_float("pace_yellow_s") if settings else 2.0,
         # Per-request override of the global so every page honours the setting.
         "format_ms": lambda ms: format_ms(ms, style),
     }

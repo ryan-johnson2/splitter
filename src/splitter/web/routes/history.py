@@ -75,6 +75,15 @@ async def race_page(request: Request, race_id: int) -> Any:
     )
 
 
+def _ids(ids: list[int], limit: int = 12) -> str:
+    """``run #5`` / ``3 runs (#5, #6, #7)`` / ``20 runs (#1, … +8 more)`` for flashes."""
+    if len(ids) == 1:
+        return f"run #{ids[0]}"
+    shown = ", ".join(f"#{i}" for i in ids[:limit])
+    more = f", +{len(ids) - limit} more" if len(ids) > limit else ""
+    return f"{len(ids)} runs ({shown}{more})"
+
+
 def _identity_fields(
     track_id: int, scene_id: int, track_source: str, quad_model_id: int, quad_class_id: int
 ) -> dict[str, Any]:
@@ -154,7 +163,7 @@ async def races_bulk(
         if action == "delete":
             for rid in race_ids:
                 await repos.delete_race(db, rid)
-            return redirect_with_flash("/races", notice=f"Deleted {len(race_ids)} races.")
+            return redirect_with_flash("/races", notice=f"Deleted {_ids(race_ids)}.")
         fields: dict[str, Any] = {}
         if track_name.strip():
             fields["track_name"] = track_name.strip()
@@ -169,4 +178,13 @@ async def races_bulk(
             return redirect_with_flash("/races", error="Nothing to change.")
         for rid in race_ids:
             await repos.update_race(db, rid, **fields)
-    return redirect_with_flash("/races", notice=f"Updated {len(race_ids)} races.")
+    what = []
+    if "track_id" in fields or "track_name" in fields:
+        what.append(f"track → {fields.get('track_name') or '#' + str(fields.get('track_id'))}")
+    if "quad_model_id" in fields or "quad_type" in fields:
+        what.append(f"quad → {fields.get('quad_type') or '#' + str(fields.get('quad_model_id'))}")
+    if "scenery" in fields:
+        what.append(f"scenery → {fields['scenery']}")
+    return redirect_with_flash(
+        "/races", notice=f"Updated {_ids(race_ids)}: {', '.join(what)}. PB flags recalculated."
+    )

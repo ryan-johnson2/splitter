@@ -38,6 +38,9 @@ DEFAULTS: dict[str, str] = {
     "brand_name": "Splitter",
     # How times are shown: seconds (like the game) | mmss | both. See core/timeparse.
     "time_format": "seconds",
+    # Live clock colour: green when ahead of the PB at the last gate, yellow when
+    # behind by up to this many seconds, red beyond it.
+    "pace_yellow_s": "2",
 }
 
 

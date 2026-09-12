@@ -24,6 +24,16 @@
     var m = map[phase] || ["dim", phase];
     pill.className = "pill " + m[0]; pill.textContent = m[1];
     $("view-countdown").hidden = phase !== "countdown";
+    // #3: in focus mode the race card owns the screen while a run is in progress.
+    document.documentElement.classList.toggle("racing", phase === "racing" || phase === "countdown");
+  }
+
+  // #2: colour the race clock by pace vs the PB at the last gate crossing.
+  function paintPace(splitMs) {
+    var el = $("race-time"), yellow = (window.SPLITTER_PACE_YELLOW_S || 2) * 1000;
+    el.classList.remove("pace-ahead", "pace-close", "pace-behind");
+    if (splitMs == null || !state.reference) return;
+    el.classList.add(splitMs < 0 ? "pace-ahead" : splitMs <= yellow ? "pace-close" : "pace-behind");
   }
 
   function renderSession(s) {
@@ -51,7 +61,7 @@
   }
 
   function resetRaceView() {
-    $("race-time").textContent = "0.000"; $("lap-time").textContent = "0.000";
+    $("race-time").textContent = "0.000"; $("lap-time").textContent = "0.000"; paintPace(null);
     $("split").innerHTML = "&nbsp;"; $("split").className = "big-delta";
     $("lap-no").textContent = "HS"; $("gate-no").textContent = "–"; $("last-gate").textContent = "–";
     $("last-lap").textContent = "–"; $("last-lap-delta").textContent = "–"; $("last-lap-delta").className = "";
@@ -74,6 +84,7 @@
     $("gate-no").textContent = c.gate;
     $("last-gate").textContent = fmt(c.gate_ms);
     setDelta($("split"), c.split_ms);
+    paintPace(c.split_ms);
     if (c.lap_done) {
       $("last-lap").textContent = fmt(c.lap_done.lap_ms);
       setDelta($("last-lap-delta"), c.lap_done.delta_ms);
@@ -233,18 +244,20 @@
   function paintFsButtons() {
     var fs = !!document.fullscreenElement, focus = root.classList.contains("focus");
     fsBtn.textContent = fs && !focus ? "🡼" : "⛶"; fsBtn.title = fs ? "leave fullscreen" : "fullscreen, menus visible";
-    focusBtn.classList.toggle("primary", fs && focus); focusBtn.title = focus ? "show menus" : "focus: fullscreen, race only";
+    focusBtn.classList.toggle("primary", focus); focusBtn.title = focus ? "show menus" : "focus: fullscreen, race only";
   }
+  var standalone = root.classList.contains("standalone");
   fsBtn.onclick = function () {
     if (document.fullscreenElement) { document.exitFullscreen(); return; }
     root.classList.remove("focus"); enterFullscreen();
   };
   focusBtn.onclick = function () {
-    if (document.fullscreenElement && root.classList.contains("focus")) { root.classList.remove("focus"); paintFsButtons(); return; }
+    if (root.classList.contains("focus")) { root.classList.remove("focus"); paintFsButtons(); return; }
     root.classList.add("focus");
-    if (document.fullscreenElement) paintFsButtons(); else enterFullscreen();
+    // Installed as an app there is no browser chrome to hide, so focus is just the layout.
+    if (document.fullscreenElement || standalone) paintFsButtons(); else enterFullscreen();
   };
-  document.addEventListener("fullscreenchange", function () { if (!document.fullscreenElement) root.classList.remove("focus"); paintFsButtons(); });
+  document.addEventListener("fullscreenchange", function () { if (!document.fullscreenElement && !standalone) root.classList.remove("focus"); paintFsButtons(); });
 
   $("btn-reconnect").onclick = function () {
     fetch("/api/connection", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "connect" }) })

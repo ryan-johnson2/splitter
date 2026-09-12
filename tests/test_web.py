@@ -279,4 +279,53 @@ async def test_service_worker_and_manifest(client: AsyncClient) -> None:
     assert "splitter-" in r.text
     m = (await client.get("/static/manifest.webmanifest")).json()
     assert m["display"] == "fullscreen" and any(i["sizes"] == "512x512" for i in m["icons"])
-    assert '/sw.js?v=' in (await client.get("/")).text
+    assert "/sw.js?v=" in (await client.get("/")).text
+
+
+async def test_bulk_edit_flash_names_the_runs(client: AsyncClient) -> None:
+    controller = client.app.state.controller  # type: ignore[attr-defined]
+    for _ in range(2):
+        await controller.handle_event(h.session())
+        await controller.handle_event(h.status("start"))
+        await controller.handle_event(h.countdown(0))
+        for lap, gate, t, fin in h.two_lap_race():
+            await controller.handle_event(h.racedata(lap, gate, t, fin))
+        await controller.handle_event(h.status("race finished"))
+    r = await client.post(
+        "/races/bulk",
+        data={
+            "race_ids": ["1", "2"],
+            "action": "update",
+            "track_id": "900",
+            "track_name": "Other",
+            "scene_id": "8",
+            "track_source": "official",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    loc = r.headers["location"]
+    assert "2+runs" in loc or "2%20runs" in loc
+    assert "track" in loc and "Other" in loc
+    rows = (await client.get("/api/races")).json()
+    assert all(x["track_id"] == 900 for x in rows) and sum(x["is_best"] for x in rows) == 1
+    page = (await client.get("/races")).text
+    assert 'class="select-all"' in page and 'class="since"' in page and "/static/races.js" in page
+
+
+async def test_pace_setting_roundtrip(client: AsyncClient) -> None:
+    assert "SPLITTER_PACE_YELLOW_S = 2.0" in (await client.get("/")).text
+    r = await client.post(
+        "/settings",
+        data={
+            "game_host": "",
+            "game_port": "60003",
+            "brand_name": "Splitter",
+            "time_format": "seconds",
+            "pace_yellow_s": "3.5",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "SPLITTER_PACE_YELLOW_S = 3.5" in (await client.get("/")).text
+    assert 'name="pace_yellow_s"' in (await client.get("/settings")).text

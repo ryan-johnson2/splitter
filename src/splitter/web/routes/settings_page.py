@@ -41,6 +41,7 @@ async def settings_save(
     event_log_keep: int = Form(5000),
     brand_name: str = Form("Splitter"),
     time_format: str = Form("seconds"),
+    pace_yellow_s: float = Form(2.0),
 ) -> Any:
     state = request.app.state
     settings = state.settings
@@ -55,6 +56,7 @@ async def settings_save(
         "event_log_keep": str(max(100, event_log_keep)),
         "brand_name": brand_name.strip() or "Splitter",
         "time_format": time_format if time_format in TIME_FORMATS else "seconds",
+        "pace_yellow_s": f"{max(0.1, min(60.0, pace_yellow_s)):g}",
     }
     host_changed = values["game_host"] != settings.get("game_host") or values[
         "game_port"
