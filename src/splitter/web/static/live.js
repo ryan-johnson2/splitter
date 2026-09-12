@@ -159,7 +159,7 @@
       resync(c.cumulative_ms);
       $("race-time").textContent = fmt(c.cumulative_ms);
     },
-    telemetry: function (t) { state.speed = t.speed; $("speed").textContent = kmh(t.speed); $("speed-bar").style.width = Math.min(100, t.speed * 3.6 / 200 * 100) + "%"; },
+    telemetry: function (t) { state.speed = t.speed; $("speed").textContent = kmh(t.speed); },
     race_finished: function (r) {
       stopClock();
       if (state.race) { state.race.finished = true; }

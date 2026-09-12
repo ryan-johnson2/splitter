@@ -160,8 +160,6 @@ details[open] summary { margin-bottom:.6rem; }
 .toast-wrap { position:fixed; right:1rem; bottom:1rem; display:flex; flex-direction:column; gap:.5rem; z-index:20; }
 .toast { background:var(--card2); border:1px solid var(--line-strong); border-radius:8px; padding:.6rem .9rem; box-shadow:0 8px 24px rgba(0,0,0,.4); }
 .toast.warn { border-color:var(--warn); } .toast.bad { border-color:var(--bad); } .toast.ok { border-color:var(--ok); }
-.speed-bar { height:.5rem; border-radius:999px; background:var(--line); overflow:hidden; margin-top:.4rem; }
-.speed-bar i { display:block; height:100%; background:var(--accent); width:0; transition:width .2s; }
 dialog { background:var(--card); color:var(--fg); border:1px solid var(--line-strong); border-radius:var(--radius); padding:1.2rem 1.4rem; max-width:32rem; width:calc(100% - 2rem); }
 dialog::backdrop { background:rgba(0,0,0,.6); }
 
