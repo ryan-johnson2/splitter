@@ -47,7 +47,7 @@
   // the install prompt (Android/desktop Chrome), and standalone-mode detection.
   (function () {
     if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
-      navigator.serviceWorker.register("/static/sw.js?v=" + encodeURIComponent({{ app_version | tojson }})).catch(function () {});
+      navigator.serviceWorker.register("/sw.js?v=" + encodeURIComponent({{ app_version | tojson }})).catch(function () {});
     }
     var standalone = window.matchMedia("(display-mode: standalone)").matches || window.matchMedia("(display-mode: fullscreen)").matches || window.navigator.standalone === true;
     if (standalone) document.documentElement.classList.add("standalone");

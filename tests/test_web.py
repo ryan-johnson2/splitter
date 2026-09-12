@@ -271,3 +271,12 @@ async def test_time_format_setting(client: AsyncClient) -> None:
     )
     assert r.status_code == 303
     assert 'window.SPLITTER_TIME_FORMAT = "mmss"' in (await client.get("/")).text
+
+
+async def test_service_worker_and_manifest(client: AsyncClient) -> None:
+    r = await client.get("/sw.js")
+    assert r.status_code == 200 and "javascript" in r.headers["content-type"]
+    assert "splitter-" in r.text
+    m = (await client.get("/static/manifest.webmanifest")).json()
+    assert m["display"] == "fullscreen" and any(i["sizes"] == "512x512" for i in m["icons"])
+    assert '/sw.js?v=' in (await client.get("/")).text

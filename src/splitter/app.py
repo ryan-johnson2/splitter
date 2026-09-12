@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from splitter.config import Config
@@ -125,6 +126,18 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.include_router(tracks.router)
     app.include_router(settings_page.router)
     app.include_router(protocol.router)
+
+    static_dir = Path(__file__).parent / "web" / "static"
+
+    @app.get("/sw.js", include_in_schema=False)
+    async def service_worker() -> FileResponse:
+        # Served from the root so its scope covers every page (a worker under
+        # /static/ could only control /static/).
+        return FileResponse(
+            static_dir / "sw.js",
+            media_type="application/javascript",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     @app.get("/healthz")
     async def healthz() -> dict[str, Any]:
