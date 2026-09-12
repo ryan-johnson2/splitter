@@ -94,6 +94,10 @@ fi
 
 say "installing wheels"
 "$VENV/bin/pip" install --quiet --no-input --upgrade pip
+# Our own wheels are force-reinstalled: dev bundles carry the same package
+# version (0.1.0) with different contents, and pip would otherwise keep the
+# old install. Dependencies are resolved by the second, ordinary install.
+"$VENV/bin/pip" install --no-input --force-reinstall --no-deps "${WHEELS[@]}"
 "$VENV/bin/pip" install --no-input --upgrade --upgrade-strategy only-if-needed "${WHEELS[@]}"
 
 INSTALLED_VERSION=$("$VENV/bin/python" -c \
