@@ -303,9 +303,20 @@ jobs:
       STAMP: ${{ needs.stamp.outputs.stamp }}
       NOTES: ${{ github.event.inputs.notes }}
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: assets
+      # gh with a retry loop rather than actions/download-artifact: fetching five
+      # artifacts at once through the action fails transiently now and then
+      # ("download failed after 5 retries") and takes the release with it.
+      - name: Download all artifacts of this run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          for attempt in 1 2 3 4 5; do
+            rm -rf assets
+            if gh run download "${{ github.run_id }}" --dir assets; then break; fi
+            echo "download attempt $attempt failed; retrying in 20 s"; sleep 20
+          done
+          find assets -type f | sort
       - name: Flatten and checksum
         run: |
           mkdir -p out
