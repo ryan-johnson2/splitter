@@ -13,6 +13,9 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "jinja2>=3.1",
     "sqlalchemy>=2.0",
+    # SQLAlchemy's async engine needs greenlet but only declares it for x86_64/aarch64
+    # machine names — Apple Silicon reports "arm64" and gets nothing. Say it outright.
+    "greenlet>=3.0",
     "aiosqlite>=0.20",
     "pydantic-settings>=2.4",
     "python-multipart>=0.0.9",

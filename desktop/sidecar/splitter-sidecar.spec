@@ -21,7 +21,7 @@ hiddenimports = (
     collect_submodules("uvicorn")
     + collect_submodules("websockets")
     + collect_submodules("sqlalchemy.dialects.sqlite")
-    + ["aiosqlite", "multipart", "python_multipart", "pydantic_settings", "jinja2"]
+    + ["aiosqlite", "greenlet", "multipart", "python_multipart", "pydantic_settings", "jinja2"]
 )
 # The optional private track client. When it is Cython-compiled its imports are
 # invisible to the analysis (no bytecode to scan), so name its dependencies too.
