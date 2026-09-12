@@ -137,10 +137,10 @@ details[open] summary { margin-bottom:.6rem; }
 .big-delta { font-size:clamp(2.2rem, 8vw, 4.5rem); font-weight:700; line-height:1.1; font-variant-numeric:tabular-nums; }
 .stat-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(100px, 1fr)); gap:.8rem 1rem; margin-top:1rem; }
 #ref-line { margin-top:.8rem; }
-/* Fullscreen on a tablet: drop the chrome, keep the timer big. */
-:fullscreen body, body:fullscreen { padding-top:0; }
-:fullscreen header#top { display:none; }
-:fullscreen main { padding-top:.6rem; }
+/* Fullscreen on a tablet. Plain fullscreen keeps the header; "focus" mode
+   (html.focus) hides it so the race card gets the whole screen. */
+:fullscreen.focus header#top { display:none; }
+:fullscreen.focus main { padding-top:.6rem; }
 .stat { color:var(--dim); font-size:.78rem; text-transform:uppercase; letter-spacing:.04em; }
 .stat b { display:block; color:var(--fg); font-size:1.5rem; font-variant-numeric:tabular-nums; text-transform:none; letter-spacing:0; }
 .state-banner { display:flex; align-items:center; gap:.8rem; padding:.7rem 1rem; border-radius:8px; background:var(--card2); border:1px solid var(--line); margin-bottom:1rem; flex-wrap:wrap; }

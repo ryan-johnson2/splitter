@@ -223,13 +223,28 @@
   };
   // Fullscreen (tablet): the Fullscreen API works over plain http on the LAN,
   // unlike "install as app", which needs https.
-  var fsBtn = $("btn-fullscreen");
-  if (!document.documentElement.requestFullscreen) fsBtn.hidden = true;
+  // Two modes: "fullscreen" keeps the header/menus; "focus" is fullscreen
+  // with the header hidden so the race card gets the whole screen.
+  var root = document.documentElement, fsBtn = $("btn-fullscreen"), focusBtn = $("btn-focus");
+  if (!root.requestFullscreen) { fsBtn.hidden = true; focusBtn.hidden = true; }
+  function enterFullscreen() {
+    return root.requestFullscreen({ navigationUI: "hide" }).catch(function () { root.classList.remove("focus"); toast("Fullscreen refused by the browser", "warn"); });
+  }
+  function paintFsButtons() {
+    var fs = !!document.fullscreenElement, focus = root.classList.contains("focus");
+    fsBtn.textContent = fs && !focus ? "🡼" : "⛶"; fsBtn.title = fs ? "leave fullscreen" : "fullscreen, menus visible";
+    focusBtn.classList.toggle("primary", fs && focus); focusBtn.title = focus ? "show menus" : "focus: fullscreen, race only";
+  }
   fsBtn.onclick = function () {
-    if (document.fullscreenElement) document.exitFullscreen();
-    else document.documentElement.requestFullscreen({ navigationUI: "hide" }).catch(function () { toast("Fullscreen refused by the browser", "warn"); });
+    if (document.fullscreenElement) { document.exitFullscreen(); return; }
+    root.classList.remove("focus"); enterFullscreen();
   };
-  document.addEventListener("fullscreenchange", function () { fsBtn.textContent = document.fullscreenElement ? "🡼" : "⛶"; fsBtn.title = document.fullscreenElement ? "leave fullscreen" : "fullscreen"; });
+  focusBtn.onclick = function () {
+    if (document.fullscreenElement && root.classList.contains("focus")) { root.classList.remove("focus"); paintFsButtons(); return; }
+    root.classList.add("focus");
+    if (document.fullscreenElement) paintFsButtons(); else enterFullscreen();
+  };
+  document.addEventListener("fullscreenchange", function () { if (!document.fullscreenElement) root.classList.remove("focus"); paintFsButtons(); });
 
   $("btn-reconnect").onclick = function () {
     fetch("/api/connection", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "connect" }) })

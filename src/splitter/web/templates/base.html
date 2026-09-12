@@ -28,7 +28,6 @@
     <a href="/races" {% if path.startswith("/races") %}class="active"{% endif %}>Races</a>
     <a href="/tracks" {% if path.startswith("/tracks") %}class="active"{% endif %}>Tracks</a>
     <a href="/settings" {% if path.startswith("/settings") %}class="active"{% endif %}>Settings</a>
-    <a href="/protocol" {% if path.startswith("/protocol") %}class="active"{% endif %}>Protocol</a>
   </nav>
   <span class="who"><span class="conn {% if game_connected %}on{% endif %}" id="conn-dot" title="game connection"></span> <span id="conn-label">{{ "game connected" if game_connected else "game offline" }}</span></span>
 </header>
@@ -40,7 +39,7 @@
 <footer>
   <span>{{ brand_name }} v{{ app_version }}</span>
   <span>·</span>
-  <a href="/healthz">health</a>
+  <a href="/healthz">health</a> · <a href="/protocol">protocol</a>
 </footer>
 <script>
   function localizeTimes(root) {
