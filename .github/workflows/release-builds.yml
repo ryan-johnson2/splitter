@@ -107,9 +107,10 @@ jobs:
             artifact: splitter-macos-arm64
             binary: desktop/src-tauri/target/release/splitter-desktop
     steps:
+      # No fetch-tags here: the stamp comes from the stamp job (SPLITTER_BUILD),
+      # and fetch-tags on a tag-triggered run trips actions/checkout
+      # ("Cannot fetch both <sha> and refs/tags/vX to refs/tags/vX").
       - uses: actions/checkout@v4
-        with:
-          fetch-tags: true
 
       # The private track client. Skipped (with a notice) when the token is absent.
       - name: Check out velocidrone-libraries (private, optional)
@@ -227,9 +228,10 @@ jobs:
       contents: read
       packages: write
     steps:
+      # No fetch-tags here: the stamp comes from the stamp job (SPLITTER_BUILD),
+      # and fetch-tags on a tag-triggered run trips actions/checkout
+      # ("Cannot fetch both <sha> and refs/tags/vX to refs/tags/vX").
       - uses: actions/checkout@v4
-        with:
-          fetch-tags: true
       - name: Check out velocidrone-libraries (private, optional)
         if: ${{ env.HAVE_TOKEN == 'true' }}
         uses: actions/checkout@v4
