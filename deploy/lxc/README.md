@@ -103,8 +103,8 @@ pct push 112 deploy/lxc/caddy/Caddyfile /root/Caddyfile   # or scp the caddy/ di
 ./install-caddy.sh                                          # inside the container
 ```
 
-It exports the CA root to `/root/splitter-ca.crt`. Install that once on the
-tablet (Android: Settings → Security → Encryption & credentials → Install a
+It serves the CA root at `http://splitter.home.ntninja.com/splitter-ca.crt`
+(also `/root/splitter-ca.crt`). Install that once on the tablet (Android: Settings → Security → Encryption & credentials → Install a
 certificate → CA certificate; iPadOS: open the file, then Settings → General →
 VPN & Device Management → install, and Settings → General → About →
 Certificate Trust Settings → enable). After that `https://splitter.home.ntninja.com/`

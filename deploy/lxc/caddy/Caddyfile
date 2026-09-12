@@ -18,6 +18,11 @@ splitter.home.ntninja.com, splitter {
 }
 
 http://splitter.home.ntninja.com, http://splitter, http://192.168.38.101 {
+	# The CA root, downloadable from the tablet over plain http.
+	handle /splitter-ca.crt {
+		root * /etc/caddy/public
+		file_server
+	}
 	reverse_proxy 127.0.0.1:8100
 	encode gzip
 }

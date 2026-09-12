@@ -32,6 +32,8 @@ sleep 2
 say "listening:"; ss -ltnp | awk 'NR>1 && ($4 ~ /:(80|443|8100)$/) {print "   ", $4, $6}'
 ROOT=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
 if [[ -f "$ROOT" ]]; then
+    install -d -o root -g root -m 0755 /etc/caddy/public
+    install -o root -g root -m 0644 "$ROOT" /etc/caddy/public/splitter-ca.crt
     cp "$ROOT" /root/splitter-ca.crt
-    say "CA root exported to /root/splitter-ca.crt — install it on the tablet, then open https://splitter.home.ntninja.com/"
+    say "CA root at http://splitter.home.ntninja.com/splitter-ca.crt — install it on the tablet, then open https://splitter.home.ntninja.com/"
 fi
