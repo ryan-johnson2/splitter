@@ -4,8 +4,9 @@ Docker stays the fast-iteration path (`docker compose up -d` from the repo
 root). This directory is the long-term hosting path: a plain Debian CT with
 Splitter in a virtualenv under systemd — the same shape as Marshal's deploy.
 
-The unit of deployment is a **bundle**: one tarball with two wheels (`splitter`
-and its sibling `velocidrone-ws`, which is not on PyPI), the installer, the
+The unit of deployment is a **bundle**: one tarball with the wheels (`splitter`,
+the vendored `velocidrone-ws`, and — in release bundles — the private
+`velocidrone-tracks` client that powers the online track picker), the installer, the
 systemd unit and the env template.
 
 ```

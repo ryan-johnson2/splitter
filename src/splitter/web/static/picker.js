@@ -52,6 +52,7 @@
         if (recent.length) { results.appendChild(head("Recent")); recent.slice(0, 8).forEach(function (t) { results.appendChild(row(t, t.track_source || "")); }); }
         return;
       }
+      if (res.available === false) { results.appendChild(head("This build has no online track lists — enter the track id by hand below.", "muted small")); return; }
       (res.tracks || []).forEach(function (t) { results.appendChild(row(t, t.source)); });
       var errs = Object.keys(res.errors || {});
       if (errs.length) results.appendChild(head(errs.map(function (k) { return k + ": " + res.errors[k]; }).join(" · "), "flash error small"));
@@ -66,6 +67,21 @@
         .then(function (res) { if (mine === seq) render(res, query); })
         .catch(function (e) { if (mine === seq) render({ tracks: [], errors: { search: e.message } }, query); });
     }
+    // Manual entry: the online id is the PB key, so it can always be typed in
+    // (from the game's track browser / velocidrone.co.uk) when search is
+    // unavailable or the track is not listed.
+    var manual = document.createElement("details"); manual.className = "picker-manual";
+    manual.innerHTML = "<summary class='muted small'>Enter a track id by hand</summary>"
+      + "<div class='inline-form'><input type='number' min='1' placeholder='online id' class='pm-id' style='width:8rem'>"
+      + "<input placeholder='track name' class='pm-name'><select class='pm-source'><option value='community'>community</option><option value='official'>official</option></select>"
+      + "<button type='button' class='sm'>Use</button></div>";
+    picked.parentNode.insertBefore(manual, picked.nextSibling);
+    manual.querySelector("button").onclick = function () {
+      var id = parseInt(manual.querySelector(".pm-id").value, 10) || 0, name = manual.querySelector(".pm-name").value.trim();
+      if (!id || !name) { manual.querySelector(id ? ".pm-name" : ".pm-id").focus(); return; }
+      set({ track_name: name, track_id: id, scene_id: 0, track_source: manual.querySelector(".pm-source").value });
+      manual.open = false;
+    };
     search.oninput = function () { clearTimeout(timer); timer = setTimeout(run, 350); };
     search.onkeydown = function (ev) { if (ev.key === "Enter") { ev.preventDefault(); clearTimeout(timer); run(); } };
     if (source) source.onchange = run;

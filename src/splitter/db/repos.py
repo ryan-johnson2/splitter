@@ -42,7 +42,8 @@ def _key_filter(key: PBKey) -> Any:
 
 
 def _finished_filter(key: PBKey) -> Any:
-    return _key_filter(key) & (Race.status == "finished") & (Race.total_time_ms.is_not(None))
+    # total_time_ms > 0: a zero total is never a real finish (see controller._finish_race).
+    return _key_filter(key) & (Race.status == "finished") & (Race.total_time_ms > 0)
 
 
 async def get_best_race(session: AsyncSession, key: PBKey) -> Race | None:
@@ -83,7 +84,7 @@ async def recalculate_best(session: AsyncSession, key: PBKey) -> int | None:
     best_id: int | None = None
     if key.valid:
         finished = sorted(
-            (r for r in rows if r.status == "finished" and r.total_time_ms is not None),
+            (r for r in rows if r.status == "finished" and (r.total_time_ms or 0) > 0),
             key=lambda r: (r.total_time_ms or 0, r.id),
         )
         best_id = finished[0].id if finished else None

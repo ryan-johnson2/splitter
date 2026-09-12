@@ -6,11 +6,13 @@ game's own online lists (the same endpoints Marshal's event form uses) so a
 pick carries the canonical name plus the online track and scene ids.
 
 Both endpoints answer without credentials (verified 2026-09-12 against the
-live API): ``get_official_tracks`` is a plain GET, and ``rated_tracks_list``
-accepts empty auth fields. The client is the synchronous ``velocidrone-api``
-library, so calls go through ``asyncio.to_thread``; the official list is
-cached whole (it is ~2000 rows and changes rarely), community searches are
-cached per query for a few minutes.
+live API). The client comes from the **private** ``velocidrone-tracks``
+package (or the full ``velocidrone-api`` when that is installed instead);
+neither ships in this repository, so the import is optional: without one the
+picker is disabled and the manual-id entry is the fallback. Release builds
+compile ``velocidrone-tracks`` in. Calls are synchronous, so they go through
+``asyncio.to_thread``; the official list is cached whole (it is ~2000 rows and
+changes rarely), community searches are cached per query for a few minutes.
 """
 
 from __future__ import annotations
@@ -21,9 +23,6 @@ import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
-
-from velocidrone_api import UserTrackQuery, VelociDroneAPI
-from velocidrone_api.models import OfficialTrack, TrackListEntry
 
 from splitter.core.scenes import scene_name
 
@@ -56,6 +55,9 @@ class CatalogError(Exception):
     """The online track list could not be fetched."""
 
 
+UNAVAILABLE = "online track lists are not included in this build — enter the track id manually"
+
+
 @dataclass(frozen=True)
 class TrackRef:
     source: str  # official | community
@@ -80,18 +82,62 @@ class SearchResult:
     tracks: list[TrackRef] = field(default_factory=list)
     errors: dict[str, str] = field(default_factory=dict)  # source → message
 
+    available: bool = True
+
     def to_dict(self) -> dict[str, Any]:
-        return {"tracks": [t.to_dict() for t in self.tracks], "errors": dict(self.errors)}
+        return {
+            "tracks": [t.to_dict() for t in self.tracks],
+            "errors": dict(self.errors),
+            "available": self.available,
+        }
+
+
+class OfficialRow(Protocol):
+    id: int
+    name: str
+    scene_id: int
+    track_type: int
+
+
+class CommunityRow(Protocol):
+    id: int
+    track_name: str
+    track_type: str
+    playername: str
+    scenery_id: int
 
 
 class TrackAPI(Protocol):
-    """The two calls we need from ``VelociDroneAPI`` (swapped for a fake in tests)."""
+    """The two calls we need (velocidrone-tracks, velocidrone-api, or a fake in tests)."""
 
-    def get_official_tracks(self) -> list[OfficialTrack]: ...
-    def search_tracks(self, query: UserTrackQuery | None = None) -> list[TrackListEntry]: ...
+    def get_official_tracks(self) -> list[Any]: ...
+    def search_tracks(self, query: Any = None) -> list[Any]: ...
 
 
-def _official_ref(t: OfficialTrack) -> TrackRef:
+QueryFactory = Callable[[str], Any]
+
+
+def load_backend() -> tuple[TrackAPI, QueryFactory] | None:
+    """The installed online client, if any: velocidrone-tracks first, else velocidrone-api."""
+    try:
+        from velocidrone_tracks import TrackClient
+        from velocidrone_tracks import UserTrackQuery as TQ
+
+        return TrackClient(timeout=15.0), lambda name: TQ(track_name=name, order_by_rating=True)
+    except ImportError as exc:
+        log.info("velocidrone_tracks not importable: %s", exc)
+    try:
+        from velocidrone_api import UserTrackQuery as AQ
+        from velocidrone_api import VelociDroneAPI
+
+        api = VelociDroneAPI(email="", hardware_key="", timeout=15.0)
+        return api, lambda name: AQ(track_name=name, order_by_rating=True)
+    except ImportError as exc:
+        log.info("velocidrone_api not importable: %s", exc)
+        return None
+
+
+def _official_ref(t: OfficialRow) -> TrackRef:
     return TrackRef(
         SOURCE_OFFICIAL,
         t.id,
@@ -101,7 +147,7 @@ def _official_ref(t: OfficialTrack) -> TrackRef:
     )
 
 
-def _community_ref(t: TrackListEntry) -> TrackRef:
+def _community_ref(t: CommunityRow) -> TrackRef:
     return TrackRef(
         SOURCE_COMMUNITY, t.id, t.scenery_id, t.track_name.strip(), t.track_type, t.playername
     )
@@ -124,12 +170,23 @@ class TrackCatalog:
         self,
         api: TrackAPI | None = None,
         *,
+        query_factory: QueryFactory | None = None,
         official_ttl: float = 3600.0,
         search_ttl: float = 300.0,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         # No credentials: neither endpoint needs them (see module docstring).
-        self._api: TrackAPI = api or VelociDroneAPI(email="", hardware_key="", timeout=15.0)
+        self._api: TrackAPI | None = api
+        self._query: QueryFactory = query_factory or (lambda name: name)
+        if api is None:
+            backend = load_backend()
+            if backend is not None:
+                self._api, self._query = backend
+            else:
+                log.warning(
+                    "no online track client installed (velocidrone-tracks) — "
+                    "track search disabled, manual track ids only"
+                )
         self._official_ttl = official_ttl
         self._search_ttl = search_ttl
         self._clock = clock
@@ -138,10 +195,17 @@ class TrackCatalog:
         self._official_lock = asyncio.Lock()
         self._community: dict[str, tuple[float, list[TrackRef]]] = {}
 
+    @property
+    def available(self) -> bool:
+        """False when no online client is installed (public source builds)."""
+        return self._api is not None
+
     # ── official ─────────────────────────────────────────────────────
 
     async def official_tracks(self) -> list[TrackRef]:
         """The whole official list, fetched at most once per TTL."""
+        if self._api is None:
+            raise CatalogError(UNAVAILABLE)
         async with self._official_lock:
             now = self._clock()
             if self._official_at is not None and now - self._official_at < self._official_ttl:
@@ -174,10 +238,10 @@ class TrackCatalog:
         cached = self._community.get(q.lower())
         if cached is not None and now - cached[0] < self._search_ttl:
             return cached[1]
+        if self._api is None:
+            raise CatalogError(UNAVAILABLE)
         try:
-            rows = await asyncio.to_thread(
-                self._api.search_tracks, UserTrackQuery(track_name=q, order_by_rating=True)
-            )
+            rows = await asyncio.to_thread(self._api.search_tracks, self._query(q))
         except Exception as exc:
             raise CatalogError(f"community track search: {exc}") from exc
         found = rank([_community_ref(t) for t in rows if t.track_name.strip()], q)
@@ -209,8 +273,11 @@ class TrackCatalog:
         A failing source is reported in ``errors`` rather than failing the
         whole search, so the tablet still gets whatever came back.
         """
-        result = SearchResult()
+        result = SearchResult(available=self.available)
         if not query.strip():
+            return result
+        if self._api is None:
+            result.errors["online"] = UNAVAILABLE
             return result
         wanted = [source] if source in SOURCES else list(SOURCES)
         calls = {

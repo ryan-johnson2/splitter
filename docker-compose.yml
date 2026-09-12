@@ -1,8 +1,8 @@
 services:
   splitter:
     build:
-      context: ..
-      dockerfile: splitter/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8100:8100"
     environment:
@@ -16,8 +16,8 @@ services:
   test:
     profiles: ["dev"]
     build:
-      context: ..
-      dockerfile: splitter/Dockerfile.dev
+      context: .
+      dockerfile: Dockerfile.dev
     volumes:
       - .:/app/splitter
     working_dir: /app/splitter

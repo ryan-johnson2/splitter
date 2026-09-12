@@ -9,7 +9,6 @@ description = "Splitter — personal VelociDrone lap timer: gate-by-gate splits,
 requires-python = ">=3.11"
 dependencies = [
     "velocidrone-ws",
-    "velocidrone-api",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "jinja2>=3.1",
@@ -20,8 +19,13 @@ dependencies = [
     "websockets>=13.0",
 ]
 
+[project.optional-dependencies]
+# The online track picker. Private package; see README "What is not in this repo".
+tracks = ["velocidrone-tracks"]
+
 [project.scripts]
 splitter = "splitter.manage:main"
+splitter-sidecar = "splitter.desktop_entry:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/splitter"]
@@ -35,8 +39,7 @@ dependencies = [
     "ruff>=0.3",
 ]
 pre-install-commands = [
-    "pip install -e ../velocidrone-libraries/velocidrone-websocket",
-    "pip install -e ../velocidrone-libraries/velocidrone-api",
+    "pip install -e libs/velocidrone-ws",
 ]
 
 [tool.hatch.envs.default.scripts]
@@ -57,4 +60,10 @@ target-version = "py311"
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[[tool.mypy.overrides]]
+# Optional online track client (private packages, not in this repo).
+module = ["velocidrone_tracks", "velocidrone_tracks.*", "velocidrone_api", "velocidrone_api.*"]
+ignore_missing_imports = true

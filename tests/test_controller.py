@@ -8,6 +8,7 @@ from splitter.db import repos
 from splitter.db.models import EventLog, GateTime, Lap, Race, TelemetrySample
 from splitter.game.controller import RaceController
 from splitter.live.hub import LiveHub
+from splitter.util import utcnow
 from tests import helpers as h
 
 
@@ -253,3 +254,39 @@ async def test_reference_follows_the_session(
     fresh.load_sticky_session()
     await fresh.refresh_reference()
     assert fresh.snapshot()["reference"]["race_id"] == 1
+
+
+async def test_finish_without_crossings_is_not_a_pb(
+    controller: RaceController, hub: LiveHub, session_factory
+) -> None:
+    """A 'race finished' with no gates seen must not become a 0.000 PB (bug seen 2026-09-12)."""
+    await controller.handle_event(h.session())
+    await fly(controller)  # a real PB: 14.000
+    q = hub.subscribe()
+    await controller.handle_event(h.status("start"))
+    await controller.handle_event(h.countdown(0))
+    await controller.handle_event(h.status("race finished"))  # no racedata at all
+    kinds = [m["type"] for m in h.drain(q)]
+    assert "race_aborted" in kinds and "race_finished" not in kinds
+    async with session_factory() as db:
+        rows = (await db.execute(select(Race).order_by(Race.id))).scalars().all()
+        assert [(r.id, r.status, r.is_best) for r in rows] == [(1, "finished", True)]
+    assert controller.snapshot()["reference"]["race_id"] == 1
+
+
+async def test_zero_total_never_reference(session_factory) -> None:
+    from splitter.db import repos
+
+    async with session_factory() as db:
+        db.add(
+            Race(track_id=5, race_laps=3, status="finished", total_time_ms=0, started_at=utcnow())
+        )
+        db.add(
+            Race(
+                track_id=5, race_laps=3, status="finished", total_time_ms=9000, started_at=utcnow()
+            )
+        )
+        await db.commit()
+        best = await repos.recalculate_best(db, repos.PBKey(5, 0, 3))
+        assert best == 2
+        assert (await repos.get_best_race(db, repos.PBKey(5, 0, 3))).total_time_ms == 9000  # type: ignore[union-attr]

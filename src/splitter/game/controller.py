@@ -541,11 +541,19 @@ class RaceController:
             if race is None:
                 self._reset_race()
                 return
+            if not aborted and (not tracker.crossings or tracker.total_ms <= 0):
+                # "race finished" without a single crossing (e.g. the game sent it
+                # for a run Splitter never saw gates for). A finished race with a
+                # zero total would become an unbeatable PB — treat it as an abort.
+                log.warning("race %d finished with no crossings — treating as aborted", race_id)
+                aborted = True
             if aborted and not tracker.crossings:
                 await db.delete(race)
                 await db.commit()
                 log.info("race %d aborted before any gate — dropped", race_id)
                 self._reset_race()
+                await self.refresh_reference()
+                self._hub.broadcast("reference", self._reference_dict())
                 self._hub.broadcast("race_aborted", {"id": race_id, "kept": False})
                 return
             race.status = "aborted" if aborted else "finished"

@@ -1,0 +1,47 @@
+name: CI
+
+# The deterministic checks every push gets: pytest, ruff, mypy, and a build of
+# the server Docker image (not pushed). Native builds are gated separately in
+# release-builds.yml so they do not run on every push.
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python — pytest / ruff / mypy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e libs/velocidrone-ws -e . "pytest>=8.0" "pytest-asyncio>=0.23" "httpx>=0.27" "mypy>=1.8" "ruff>=0.3"
+      - run: ruff check src tests
+      - run: ruff format --check src tests
+      - run: mypy src
+      - run: python -m pytest -q
+
+  docker:
+    name: Docker — image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: splitter:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

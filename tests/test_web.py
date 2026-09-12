@@ -185,7 +185,7 @@ async def test_track_search_endpoint(client: AsyncClient) -> None:
     }
     assert fake.calls == [("usadt", "community", 30)]
     r = await client.get("/api/tracks/search", params={"q": "", "limit": "500"})
-    assert r.json() == {"tracks": [], "errors": {}}
+    assert r.json() == {"tracks": [], "errors": {}, "available": True}
     assert fake.calls[-1] == ("", "", 100)
 
 

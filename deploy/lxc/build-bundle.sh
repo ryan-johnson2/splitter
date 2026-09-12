@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 #
-# Build the LXC deployment bundle: wheels for splitter and its siblings
-# velocidrone-ws and velocidrone-api (not on PyPI), plus the installer, unit file and
-# env template, tarred into one artifact to copy into the container.
+# Build the LXC deployment bundle: wheels for splitter and the vendored
+# velocidrone-ws (not on PyPI), plus — when available — the private
+# velocidrone-tracks wheel that enables the online track picker, plus the
+# installer, unit file and env template, tarred into one artifact.
+#
+# velocidrone-tracks is looked for at $TRACKS_SRC, else
+# ../velocidrone-libraries/velocidrone-tracks, else ./wheels/velocidrone_tracks-*.whl;
+# absent all three the bundle still builds (picker disabled, manual ids only).
 #
 # Usage (from anywhere):
 #     deploy/lxc/build-bundle.sh
@@ -13,16 +18,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
-WS_SRC="$(cd -- "$REPO_ROOT/../velocidrone-libraries/velocidrone-websocket" && pwd)"
-API_SRC="$(cd -- "$REPO_ROOT/../velocidrone-libraries/velocidrone-api" && pwd)"
+WS_SRC="$REPO_ROOT/libs/velocidrone-ws"
+TRACKS_SRC="${TRACKS_SRC:-$REPO_ROOT/../velocidrone-libraries/velocidrone-tracks}"
 DIST="$SCRIPT_DIR/dist"
 
 die() { echo "error: $*" >&2; exit 1; }
 say() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 
 [[ -f "$REPO_ROOT/pyproject.toml" ]] || die "cannot locate the splitter repo root"
-[[ -f "$WS_SRC/pyproject.toml" ]] || die "velocidrone-websocket not found at $WS_SRC"
-[[ -f "$API_SRC/pyproject.toml" ]] || die "velocidrone-api not found at $API_SRC"
+[[ -f "$WS_SRC/pyproject.toml" ]] || die "vendored velocidrone-ws not found at $WS_SRC"
 
 rm -rf "$DIST"
 mkdir -p "$DIST"
@@ -31,7 +35,7 @@ mkdir -p "$DIST"
 # Docker is preferred (nothing is installed on the host); uv/hatch next;
 # else an ephemeral venv rather than touching system pip.
 BUILD_VENV=""
-PARENT="$(cd -- "$REPO_ROOT/.." && pwd)"
+PARENT="$(cd -- "$REPO_ROOT/.." && pwd)"  # mount the parent so ../velocidrone-libraries is reachable too
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     say "building with docker (python:3.12-slim)"
     build_wheel() {
@@ -57,8 +61,15 @@ fi
 
 say "building velocidrone-ws wheel"
 build_wheel "$WS_SRC"
-say "building velocidrone-api wheel"
-build_wheel "$API_SRC"
+if [[ -f "$TRACKS_SRC/pyproject.toml" ]]; then
+    say "building velocidrone-tracks wheel (online track picker)"
+    build_wheel "$TRACKS_SRC"
+elif compgen -G "$REPO_ROOT/wheels/velocidrone_tracks-*.whl" >/dev/null; then
+    say "using prebuilt velocidrone-tracks wheel"
+    cp "$REPO_ROOT"/wheels/velocidrone_tracks-*.whl "$DIST/"
+else
+    say "velocidrone-tracks not available — bundle will have no online track picker"
+fi
 say "building splitter wheel"
 build_wheel "$REPO_ROOT"
 

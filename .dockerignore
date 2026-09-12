@@ -1,0 +1,11 @@
+.git
+data/
+desktop/sidecar/dist
+desktop/sidecar/build
+desktop/src-tauri/target
+deploy/lxc/dist
+**/__pycache__
+**/.mypy_cache
+**/.ruff_cache
+**/.pytest_cache
+.env

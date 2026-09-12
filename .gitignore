@@ -7,3 +7,9 @@ dist/
 .ruff_cache/
 .pytest_cache/
 .venv/
+wheels/
+desktop/sidecar/dist/
+desktop/sidecar/build/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+*.spec.bak

@@ -1,0 +1,41 @@
+# Splitter native desktop app (Tauri 2) — the portable, standalone release form.
+#
+# The Python app is not rewritten here: this shell EMBEDS the PyInstaller sidecar
+# (desktop/sidecar/dist/splitter-sidecar[.exe]) into its own binary at build time,
+# extracts it into the data directory on launch, runs it, waits for its ready
+# line, and opens a webview at the URL it reports. One file to hand out.
+#
+# Build (after `python desktop/sidecar/build.py`):
+#     cd desktop/src-tauri && npx @tauri-apps/cli@2 build --no-bundle
+[package]
+name = "splitter-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "Splitter native desktop app — runs the Splitter lap timer and opens it in a window."
+default-run = "splitter-desktop"
+
+[workspace]
+
+[lib]
+name = "splitter_desktop_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "splitter-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# PR_SET_PDEATHSIG: the kernel signals the sidecar when this shell dies, whatever
+# the cause. Belt and braces with the sidecar's own parent watchdog.
+libc = "0.2"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

@@ -1,0 +1,252 @@
+name: Release builds
+
+# Gated, cost-aware build pipeline (GridFPV's shape). Produces:
+#   - the PORTABLE native desktop app per OS: one standalone executable
+#     (Tauri shell with the PyInstaller sidecar embedded; no installers)
+#   - the LXC bundle tarball (wheels + installer + unit) for self-hosting
+#   - the Docker image on GHCR
+# and, on a v* tag, a GitHub Release carrying all of them.
+#
+# Runs only on demand or on a version tag — never on plain pushes.
+#
+# Secrets:
+#   LIBRARIES_TOKEN  read access to ryan-johnson2/velocidrone-libraries. Optional:
+#                    when present the private velocidrone-tracks client is built in
+#                    (Cython-compiled), enabling the online track picker. Without it
+#                    every artifact still builds, with manual track ids only.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release-builds-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  # Secrets are not usable in `if:`; this env flag is.
+  HAVE_TOKEN: ${{ secrets.LIBRARIES_TOKEN != '' }}
+
+jobs:
+  desktop:
+    name: ${{ matrix.os }} — portable desktop app
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The sidecar is built in a Debian bullseye container (glibc 2.31 floor);
+          # the shell links WebKitGTK dynamically and needs it on the target.
+          - os: ubuntu-22.04
+            artifact: splitter-linux-x64
+            binary: desktop/src-tauri/target/release/splitter-desktop
+          - os: windows-latest
+            artifact: splitter-windows-x64
+            binary: desktop/src-tauri/target/release/splitter-desktop.exe
+          - os: macos-latest
+            artifact: splitter-macos-arm64
+            binary: desktop/src-tauri/target/release/splitter-desktop
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+
+      # The private track client. Skipped (with a notice) when the token is absent.
+      - name: Check out velocidrone-libraries (private, optional)
+        if: ${{ env.HAVE_TOKEN == 'true' }}
+        uses: actions/checkout@v4
+        with:
+          repository: ryan-johnson2/velocidrone-libraries
+          token: ${{ secrets.LIBRARIES_TOKEN }}
+          path: _libraries
+          sparse-checkout: velocidrone-tracks
+      - name: Note when the private client is unavailable
+        if: ${{ env.HAVE_TOKEN != 'true' }}
+        run: echo "::notice::LIBRARIES_TOKEN not set — building without the online track picker"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # Linux: build inside an old-glibc container (Debian bullseye, glibc 2.31,
+      # 2020) so the frozen binary runs on practically any current distro. A fully
+      # static PyInstaller build is not possible (the bundled C extensions are
+      # shared objects) and the manylinux interpreters lack the shared libpython
+      # PyInstaller needs. Windows/macOS have no such floor problem.
+      - name: Build the sidecar (Linux, glibc 2.31 floor)
+        if: startsWith(matrix.os, 'ubuntu')
+        shell: bash
+        run: |
+          TRACKS=""; [ -d _libraries/velocidrone-tracks ] && TRACKS="--tracks /w/_libraries/velocidrone-tracks --protect"
+          docker run --rm -v "$PWD:/w" -w /w -e HOME=/tmp python:3.12-bullseye \
+            python desktop/sidecar/build.py $TRACKS
+          sudo chown -R "$(id -u):$(id -g)" desktop/sidecar
+          rm -rf _libraries
+      - name: Build the sidecar (Windows / macOS)
+        if: ${{ !startsWith(matrix.os, 'ubuntu') }}
+        shell: bash
+        run: |
+          if [ -d _libraries/velocidrone-tracks ]; then
+            python desktop/sidecar/build.py --tracks _libraries/velocidrone-tracks --protect
+          else
+            python desktop/sidecar/build.py
+          fi
+          rm -rf _libraries
+
+      - name: Install Tauri Linux system deps
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libssl-dev libayatana-appindicator3-dev xvfb
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+          key: ${{ matrix.os }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Portable-only: --no-bundle compiles the shell (with the sidecar embedded by
+      # build.rs) and produces NO installers.
+      - name: Build the portable shell (tauri build --no-bundle)
+        run: npx -y @tauri-apps/cli@2 build --no-bundle
+        working-directory: desktop/src-tauri
+
+      # Does the thing we are about to ship actually start? The shell must extract and
+      # spawn its sidecar, see SPLITTER_READY, open the window, and still be alive.
+      - name: Smoke-test the portable binary
+        shell: bash
+        env:
+          BIN: ${{ matrix.binary }}
+        run: |
+          set -uo pipefail
+          WORK="$(mktemp -d)"; cp "$BIN" "$WORK/app"; chmod +x "$WORK/app"
+          if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a "$WORK/app" & else "$WORK/app" & fi
+          APP=$!
+          LOG="$WORK/splitter-data/splitter-desktop.log"
+          for _ in $(seq 1 90); do
+            sleep 1
+            kill -0 "$APP" 2>/dev/null || break
+            grep -qs "sidecar ready" "$LOG" && break
+          done
+          if ! kill -0 "$APP" 2>/dev/null; then
+            echo "::error::splitter-desktop exited on startup on $RUNNER_OS"; cat "$LOG" 2>/dev/null || true; exit 1
+          fi
+          if ! grep -qs "sidecar ready" "$LOG"; then
+            echo "::error::splitter-desktop never reported its sidecar ready"; cat "$LOG" 2>/dev/null || true; kill "$APP" || true; exit 1
+          fi
+          URL="$(grep -h 'sidecar ready' "$LOG" | head -1 | sed 's/.*opening //')"
+          curl -fsS "${URL}healthz" | head -c 200; echo
+          echo "started cleanly on $RUNNER_OS — data dir was created beside the exe:"; ls "$WORK/splitter-data"
+          kill "$APP" 2>/dev/null || true; wait "$APP" 2>/dev/null || true
+
+      - name: Stage with a release name
+        shell: bash
+        run: |
+          mkdir -p out
+          ext=""; [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
+          cp "${{ matrix.binary }}" "out/${{ matrix.artifact }}${ext}"
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: out/*
+          if-no-files-found: error
+
+  server:
+    name: Server — LXC bundle + Docker image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+      - name: Check out velocidrone-libraries (private, optional)
+        if: ${{ env.HAVE_TOKEN == 'true' }}
+        uses: actions/checkout@v4
+        with:
+          repository: ryan-johnson2/velocidrone-libraries
+          token: ${{ secrets.LIBRARIES_TOKEN }}
+          path: _libraries
+          sparse-checkout: velocidrone-tracks
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Build the private client wheel (when available)
+        shell: bash
+        run: |
+          mkdir -p wheels
+          if [ -d _libraries/velocidrone-tracks ]; then
+            pip install -q build hatchling
+            python -m build --wheel --outdir wheels _libraries/velocidrone-tracks
+          else
+            echo "::notice::no LIBRARIES_TOKEN — server artifacts without the online track picker"
+          fi
+          rm -rf _libraries; ls wheels || true
+
+      - name: Build the LXC bundle
+        run: TRACKS_SRC=/nonexistent deploy/lxc/build-bundle.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: splitter-lxc-bundle
+          path: deploy/lxc/dist/splitter-lxc-*.tar.gz
+          if-no-files-found: error
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha
+      - name: Build and push the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [desktop, server]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+      - name: Flatten and checksum
+        run: |
+          mkdir -p out
+          find assets -type f -exec cp {} out/ \;
+          (cd out && sha256sum * > SHA256SUMS.txt && ls -la)
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
+          body: |
+            **Desktop (portable, no install):** download the file for your OS and run it. It keeps
+            its data in a `splitter-data` folder next to the executable. Windows SmartScreen and
+            macOS Gatekeeper will warn once because the binaries are unsigned.
+
+            **Self-hosting:** `splitter-lxc-<version>.tar.gz` (Proxmox LXC / any systemd host, see
+            `deploy/lxc/README.md`) or the Docker image `ghcr.io/${{ github.repository }}:${{ github.ref_name }}`.

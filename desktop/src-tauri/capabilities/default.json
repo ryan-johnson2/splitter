@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Minimal capabilities: the page talks to the embedded Splitter server over HTTP/WS (same origin), so no Tauri JS API is needed beyond core defaults.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

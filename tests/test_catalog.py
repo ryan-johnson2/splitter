@@ -2,13 +2,35 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import pytest
-from velocidrone_api import UserTrackQuery
-from velocidrone_api.models import OfficialTrack, TrackListEntry
 
 from splitter.game.catalog import CatalogError, TrackCatalog, TrackRef, rank
+
+
+# Row shapes as the online client returns them (duck-typed; see catalog.OfficialRow etc.).
+@dataclass(frozen=True)
+class OfficialTrack:
+    id: int
+    name: str
+    scene_id: int
+    track_type: int = 0
+
+
+@dataclass(frozen=True)
+class TrackListEntry:
+    id: int
+    track_name: str
+    track_type: str
+    playername: str
+    scenery_id: int
+
+
+@dataclass(frozen=True)
+class UserTrackQuery:
+    track_name: str = ""
 
 
 class FakeAPI:
@@ -61,7 +83,13 @@ def api() -> FakeAPI:
 @pytest.fixture
 def catalog(api: FakeAPI) -> TrackCatalog:
     clock = {"t": 0.0}
-    cat = TrackCatalog(api, official_ttl=100, search_ttl=10, clock=lambda: clock["t"])
+    cat = TrackCatalog(
+        api,
+        query_factory=lambda name: UserTrackQuery(track_name=name),
+        official_ttl=100,
+        search_ttl=10,
+        clock=lambda: clock["t"],
+    )
     cat.clock = clock  # type: ignore[attr-defined]
     return cat
 
@@ -127,9 +155,22 @@ async def test_official_failure_uses_stale_then_errors(catalog: TrackCatalog, ap
     api.official_fail = True
     catalog.clock["t"] = 500  # type: ignore[attr-defined]
     assert len(await catalog.official_tracks()) == 3  # stale copy served
-    fresh = TrackCatalog(api)
+    fresh = TrackCatalog(api, query_factory=lambda name: UserTrackQuery(track_name=name))
     with pytest.raises(CatalogError):
         await fresh.official_tracks()
+
+
+async def test_no_backend_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    from splitter.game import catalog as mod
+
+    monkeypatch.setattr(mod, "load_backend", lambda: None)
+    cat = TrackCatalog()
+    assert cat.available is False
+    res = await cat.search("usadt")
+    assert res.tracks == [] and res.available is False and "online" in res.errors
+    assert await cat.resolve("USADT Recruitment") is None
+    with pytest.raises(CatalogError):
+        await cat.official_tracks()
 
 
 async def test_limit(catalog: TrackCatalog) -> None:

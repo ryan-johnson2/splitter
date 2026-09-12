@@ -119,15 +119,33 @@ docker compose --profile dev run --rm test ruff check src tests
 docker compose --profile dev run --rm test mypy src
 ```
 
-The build context is the parent directory so the image can install the sibling
-`velocidrone-libraries/velocidrone-websocket` and `velocidrone-api`. Never hit a
-real game or the online API from tests (`app.state.catalog` takes a fake).
+The repo is self-contained: the websocket client is vendored under
+`libs/velocidrone-ws` (copied from velocidrone-libraries; keep them in step by
+hand). The online track client is the **private** `velocidrone-tracks` package
+(velocidrone-libraries repo) and is an *optional* import (`game/catalog.py::
+load_backend`); without it the picker is disabled and manual ids work. Never hit
+a real game or the online API from tests (`app.state.catalog` takes a fake).
 
 Exercise the whole pipeline without the game:
 `splitter fake-game --port 60003 --loop [--no-session] [--speed 5]` (a
 scripted server speaking the real wire shapes), then set the game address to
 that host on the Settings page.
 
-Deploy: `deploy/lxc/` (bundle = all three wheels + installer + unit; `install.sh`
-is idempotent and is the upgrade path). Docker: `docker compose up -d`, data in
-`./data`, port 8100.
+Deploy: `deploy/lxc/` (bundle = splitter + velocidrone-ws wheels, plus the
+private tracks wheel when available, + installer + unit; `install.sh` is
+idempotent and is the upgrade path). Docker: `docker compose up -d`, data in
+`./data`, port 8100; release images go to ghcr.io/ryan-johnson2/splitter.
+
+## Desktop / releases
+
+`desktop/` holds the portable native app: `sidecar/build.py` freezes the server
+with PyInstaller (`--tracks … --protect` Cython-compiles the private client in),
+`src-tauri/` is a Tauri 2 shell that **embeds** that binary (`build.rs`), extracts
+it into a portable `splitter-data/` folder beside the exe, spawns it and opens a
+window at its `SPLITTER_READY` URL (`splitter/desktop_entry.py`). Config reads
+`SPLITTER_DATA_DIR` for the SQLite location. `.github/workflows/release-builds.yml`
+builds all of it on a `v*` tag (or on demand): portable exe per OS, LXC bundle,
+GHCR image, GitHub Release. Secret `LIBRARIES_TOKEN` (read access to
+velocidrone-libraries) is what makes the online picker part of a build. Do not
+touch the user's running Docker container while working on release plumbing
+unless asked.
