@@ -280,6 +280,10 @@ jobs:
             type=sha
       - name: Build and push the image
         uses: docker/build-push-action@v6
+        env:
+          # The action's build-record artifact (*.dockerbuild) is not downloadable
+          # like ours and broke the release job's "download everything" step.
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: .
           push: true
@@ -303,9 +307,9 @@ jobs:
       STAMP: ${{ needs.stamp.outputs.stamp }}
       NOTES: ${{ github.event.inputs.notes }}
     steps:
-      # gh with a retry loop rather than actions/download-artifact: fetching five
-      # artifacts at once through the action fails transiently now and then
-      # ("download failed after 5 retries") and takes the release with it.
+      # gh with a retry loop, restricted to our own splitter-* artifacts: the
+      # docker build-record artifact the build action used to upload fails to
+      # download ("failed after 5 retries") and took the release with it.
       - name: Download all artifacts of this run
         env:
           GH_TOKEN: ${{ github.token }}
@@ -313,7 +317,7 @@ jobs:
         run: |
           for attempt in 1 2 3 4 5; do
             rm -rf assets
-            if gh run download "${{ github.run_id }}" --dir assets; then break; fi
+            if gh run download "${{ github.run_id }}" --dir assets --pattern "splitter-*"; then break; fi
             echo "download attempt $attempt failed; retrying in 20 s"; sleep 20
           done
           find assets -type f | sort
