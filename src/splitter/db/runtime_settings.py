@@ -26,11 +26,18 @@ DEFAULTS: dict[str, str] = {
     # Last known session, reused when the game doesn't say (single player).
     "last_track_name": "",
     "last_scenery": "",
+    "last_track_id": "0",
+    "last_scene_id": "0",
+    "last_track_source": "",
     "last_quad_type": "",
     "last_quad_size": "",
+    "last_quad_model_id": "0",
+    "last_quad_class_id": "0",
     "last_race_mode": "",
     "last_race_laps": "0",
     "brand_name": "Splitter",
+    # How times are shown: seconds (like the game) | mmss | both. See core/timeparse.
+    "time_format": "seconds",
 }
 
 

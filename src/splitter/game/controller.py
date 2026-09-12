@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
 
@@ -34,12 +34,14 @@ from velocidrone_ws import (
     SessionEvent,
 )
 
+from splitter.core import quads
 from splitter.core.splits import Reference
 from splitter.core.telemetry import SegmentStats, TelemetryBuffer
 from splitter.core.timing import Crossing, RaceTracker
 from splitter.db import repos
 from splitter.db.models import GateTime, Lap, Race, TelemetrySample
 from splitter.db.runtime_settings import RuntimeSettings
+from splitter.game.catalog import TrackRef
 from splitter.game.session import SOURCE_GAME, SOURCE_MANUAL, SOURCE_STICKY, SessionState
 from splitter.live.hub import LiveHub
 from splitter.util import utcnow
@@ -71,11 +73,14 @@ class RaceController:
         session_factory: async_sessionmaker[AsyncSession],
         hub: LiveHub,
         status_provider: Callable[[], dict[str, object]] | None = None,
+        resolve_track: Callable[[str], Awaitable[TrackRef | None]] | None = None,
     ) -> None:
         self._settings = settings
         self._sf = session_factory
         self._hub = hub
         self._status_provider = status_provider or (lambda: {})
+        # Gives a game-named track (hosted room) its online id; None = never resolve.
+        self._resolve_track = resolve_track
 
         self.session = SessionState()
         self.tracker: RaceTracker | None = None
@@ -105,8 +110,13 @@ class RaceController:
             self.session = SessionState(
                 track_name=s.get("last_track_name"),
                 scenery=s.get("last_scenery"),
+                track_id=s.get_int("last_track_id"),
+                scene_id=s.get_int("last_scene_id"),
+                track_source=s.get("last_track_source"),
                 quad_type=s.get("last_quad_type"),
                 quad_size=s.get("last_quad_size"),
+                quad_model_id=s.get_int("last_quad_model_id"),
+                quad_class_id=s.get_int("last_quad_class_id"),
                 race_mode=s.get("last_race_mode"),
                 race_laps=s.get_int("last_race_laps"),
                 source=SOURCE_STICKY,
@@ -129,6 +139,7 @@ class RaceController:
                 "crossings": [self._crossing_dict(c) for c in self.tracker.crossings],
                 "laps": [self._lap_dict(lap) for lap in self.tracker.laps],
                 "total_ms": self.tracker.total_ms,
+                "holeshot_ms": self.tracker.holeshot_ms,
                 "current_lap": self.tracker.current_lap,
                 "lap_start_ms": self.tracker.lap_start_ms,
                 "finished": self.tracker.finished,
@@ -154,12 +165,27 @@ class RaceController:
         quad_size: str = "",
         race_laps: int = 0,
         race_mode: str = "",
+        track_id: int = 0,
+        scene_id: int = 0,
+        track_source: str = "",
+        quad_model_id: int = 0,
+        quad_class_id: int = 0,
     ) -> None:
+        if quad_model_id and not quad_type.strip():
+            quad_type = quads.model_name(quad_model_id)
+        if quad_model_id and not quad_class_id:
+            model = quads.catalog().model(quad_model_id)
+            quad_class_id = model.component_group_id if model else 0
         self.session = SessionState(
             track_name=track_name.strip(),
             scenery=scenery.strip(),
+            track_id=track_id,
+            scene_id=scene_id,
+            track_source=track_source.strip(),
             quad_type=quad_type.strip(),
             quad_size=quad_size.strip(),
+            quad_model_id=quad_model_id,
+            quad_class_id=quad_class_id,
             race_mode=race_mode.strip() or self.session.race_mode,
             race_format=self.session.race_format,
             race_laps=race_laps or self.session.race_laps,
@@ -167,7 +193,23 @@ class RaceController:
             source=SOURCE_MANUAL,
         )
         await self._persist_session()
+        await self.refresh_reference()
         self._hub.broadcast("session", self.session.to_dict())
+        self._hub.broadcast("reference", self._reference_dict())
+
+    async def refresh_reference(self) -> None:
+        """Load the PB the *next* run would be compared against (idle only).
+
+        Keeps the live page honest between runs: the reference line shows the
+        current PB for the session's track/quad/laps, or that there is none.
+        """
+        if self.race_active:
+            return
+        s = self.session
+        async with self._sf() as db:
+            self.reference = await repos.load_reference(
+                db, repos.PBKey(s.track_id, s.quad_model_id, s.race_laps)
+            )
 
     async def set_player_name(self, name: str) -> None:
         self.player_name = name.strip()
@@ -206,11 +248,35 @@ class RaceController:
     # ── handlers ─────────────────────────────────────────────────────
 
     async def _on_session(self, data: SessionEvent) -> None:
+        # The game names the track but has no ids; keep the picker's ids when
+        # it is the same track we already had.
+        same = data.track_name.strip() == self.session.track_name.strip()
+        prev = self.session
+        track_id, scene_id, track_source = (
+            (prev.track_id, prev.scene_id, prev.track_source) if same else (0, 0, "")
+        )
+        if not track_id and self._resolve_track is not None:
+            try:
+                ref = await self._resolve_track(data.track_name)
+            except Exception:  # the online lookup must never break the race feed
+                log.exception("track lookup failed for %r", data.track_name)
+                ref = None
+            if ref is not None:
+                track_id, scene_id, track_source = ref.track_id, ref.scene_id, ref.source
+                log.info("resolved %r to %s #%d", data.track_name, ref.source, ref.track_id)
+            else:
+                log.warning("no online track id for %r — PBs off for this run", data.track_name)
+        model = quads.catalog().model_by_name(data.quad_type)
         self.session = SessionState(
             track_name=data.track_name,
             scenery=data.scenery_title,
+            track_id=track_id,
+            scene_id=scene_id,
+            track_source=track_source,
             quad_type=data.quad_type,
             quad_size=data.quad_size,
+            quad_model_id=model.model_id if model else 0,
+            quad_class_id=model.component_group_id if model else 0,
             race_mode=data.race_mode,
             race_laps=data.race_length,
             player_name=data.player_name,
@@ -220,16 +286,22 @@ class RaceController:
         if data.player_name and not self.player_name:
             self.player_name = data.player_name
         await self._persist_session()
+        await self.refresh_reference()
         log.info("session from game: %s / %s (%s)", data.track_name, data.quad_type, data.race_mode)
         self._hub.broadcast("session", self.session.to_dict())
+        self._hub.broadcast("reference", self._reference_dict())
 
     async def _on_race_type(self, data: RaceTypeEvent) -> None:
         self.session.race_mode = data.race_mode or self.session.race_mode
         self.session.race_format = data.race_format
+        laps_changed = bool(data.race_laps) and data.race_laps != self.session.race_laps
         if data.race_laps:
             self.session.race_laps = data.race_laps
         self.session.updated_at = utcnow()
         self._hub.broadcast("session", self.session.to_dict())
+        if laps_changed:
+            await self.refresh_reference()
+            self._hub.broadcast("reference", self._reference_dict())
 
     async def _on_player(self, data: PlayerEvent) -> None:
         if data.player_name and not self.player_name:
@@ -366,12 +438,19 @@ class RaceController:
         self.race_started_at = utcnow()
         s = self.session
         async with self._sf() as db:
-            self.reference = await repos.load_reference(db, s.track_name, s.quad_type, s.race_laps)
+            self.reference = await repos.load_reference(
+                db, repos.PBKey(s.track_id, s.quad_model_id, s.race_laps)
+            )
             race = Race(
                 track_name=s.track_name,
                 scenery=s.scenery,
+                track_id=s.track_id,
+                scene_id=s.scene_id,
+                track_source=s.track_source,
                 quad_type=s.quad_type,
                 quad_size=s.quad_size,
+                quad_model_id=s.quad_model_id,
+                quad_class_id=s.quad_class_id,
                 race_mode=s.race_mode,
                 race_format=s.race_format,
                 race_laps=s.race_laps,
@@ -473,6 +552,7 @@ class RaceController:
             race.ended_at = utcnow()
             race.total_laps = len(tracker.laps)
             race.gates_per_lap = tracker.gates_per_lap
+            race.holeshot_ms = tracker.holeshot_ms
             if not aborted:
                 race.total_time_ms = tracker.total_ms
                 if ref is not None:
@@ -487,18 +567,18 @@ class RaceController:
             await db.commit()
             is_best = False
             if not aborted:
-                best_id = await repos.recalculate_best(
-                    db, race.track_name, race.quad_type, race.race_laps
-                )
+                best_id = await repos.recalculate_best(db, repos.race_key(race))
                 is_best = best_id == race.id
             result = {
                 "id": race.id,
                 "status": race.status,
                 "aborted": aborted,
                 "track_name": race.track_name,
+                "track_id": race.track_id,
                 "quad_type": race.quad_type,
                 "race_laps": race.race_laps,
                 "total_ms": race.total_time_ms,
+                "holeshot_ms": race.holeshot_ms,
                 "total_laps": race.total_laps,
                 "gates_per_lap": race.gates_per_lap,
                 "laps": [self._lap_dict(lap) for lap in tracker.laps],
@@ -523,6 +603,8 @@ class RaceController:
         )
         self.last_result = result
         self._reset_race()
+        await self.refresh_reference()  # the PB the next run is measured against
+        result["next_reference"] = self._reference_dict()
         self._hub.broadcast("race_finished", result)
 
     def _store_telemetry(self, db: AsyncSession, race_id: int) -> int:
@@ -574,8 +656,13 @@ class RaceController:
                 {
                     "last_track_name": s.track_name,
                     "last_scenery": s.scenery,
+                    "last_track_id": str(s.track_id),
+                    "last_scene_id": str(s.scene_id),
+                    "last_track_source": s.track_source,
                     "last_quad_type": s.quad_type,
                     "last_quad_size": s.quad_size,
+                    "last_quad_model_id": str(s.quad_model_id),
+                    "last_quad_class_id": str(s.quad_class_id),
                     "last_race_mode": s.race_mode,
                     "last_race_laps": str(s.race_laps),
                 },
@@ -614,6 +701,7 @@ class RaceController:
             "gate_delta_ms": ref.gate_delta(c.seq, c.gate_ms) if ref else None,
             "finished": c.finished,
             "ends_lap": c.lap_done.lap if c.lap_done else None,
+            "starts_lap": c.starts_lap,
         }
 
     def _lap_dict(self, lap: Any) -> dict[str, Any]:

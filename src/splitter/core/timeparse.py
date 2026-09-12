@@ -2,16 +2,31 @@
 
 from __future__ import annotations
 
+TIME_FORMATS: dict[str, str] = {
+    "seconds": "seconds only, like the game (144.359)",
+    "mmss": "minutes and seconds (2:24.359)",
+    "both": "both (2:24.359 (144.359))",
+}
+DEFAULT_TIME_FORMAT = "seconds"
 
-def format_ms(ms: int | None) -> str:
-    """Render milliseconds as ``M:SS.mmm`` (or ``SS.mmm`` under a minute)."""
+
+def format_ms(ms: int | None, style: str = DEFAULT_TIME_FORMAT) -> str:
+    """Render milliseconds in the chosen style (see ``TIME_FORMATS``).
+
+    VelociDrone shows every time in plain seconds, so that is the default;
+    ``mmss`` gives ``M:SS.mmm`` (``SS.mmm`` under a minute), ``both`` shows
+    the seconds in parentheses after the minutes form.
+    """
     if ms is None or ms < 0:
         return "--"
+    seconds_only = f"{ms / 1000:.3f}"
+    if style == "seconds":
+        return seconds_only
     minutes, rem = divmod(ms, 60_000)
-    seconds = rem / 1000
-    if minutes:
-        return f"{minutes}:{seconds:06.3f}"
-    return f"{seconds:.3f}"
+    mmss = f"{minutes}:{rem / 1000:06.3f}" if minutes else seconds_only
+    if style == "both" and minutes:
+        return f"{mmss} ({seconds_only})"
+    return mmss
 
 
 def format_delta(ms: int | None) -> str:

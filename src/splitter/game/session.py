@@ -16,8 +16,16 @@ SOURCE_MANUAL = "manual"  # entered on the tablet
 class SessionState:
     track_name: str = ""
     scenery: str = ""
+    # Online identity from the track picker (0 / "" when the name was typed
+    # or came from the game's session event, which carries names only).
+    track_id: int = 0
+    scene_id: int = 0
+    track_source: str = ""  # official | community | ""
     quad_type: str = ""
     quad_size: str = ""
+    # From the quad picker / catalog match (0 when unknown).
+    quad_model_id: int = 0
+    quad_class_id: int = 0
     race_mode: str = ""
     race_format: str = ""
     race_laps: int = 0
@@ -30,8 +38,14 @@ class SessionState:
     def known(self) -> bool:
         return bool(self.track_name)
 
+    @property
+    def identified(self) -> bool:
+        """Has an online track id — the requirement for PB tracking."""
+        return self.track_id > 0
+
     def to_dict(self) -> dict[str, object]:
         d = asdict(self)
         d["updated_at"] = self.updated_at.replace(microsecond=0).isoformat() + "Z"
         d["known"] = self.known
+        d["identified"] = self.identified
         return d

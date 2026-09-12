@@ -67,6 +67,12 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("settings", help="show or set runtime settings")
     p.add_argument("key", nargs="?")
     p.add_argument("value", nargs="?")
+    p = sub.add_parser(
+        "extract-catalog",
+        help="regenerate the bundled quad/scene catalog from the game's settings.db",
+    )
+    p.add_argument("settings_db")
+    p.add_argument("--out", default="", help="write here instead of the package data dir")
     p = sub.add_parser("fake-game", help="serve a scripted fake VelociDrone websocket for testing")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=60003)
@@ -91,6 +97,15 @@ def main(argv: list[str] | None = None) -> None:
         asyncio.run(_cmd_races(cfg, args))
     elif args.cmd == "settings":
         asyncio.run(_cmd_settings(cfg, args))
+    elif args.cmd == "extract-catalog":
+        from pathlib import Path
+
+        from splitter.core.quads import BUNDLED_CATALOG, read_game_db, write_bundled_catalog
+
+        cat = read_game_db(Path(args.settings_db))
+        out = Path(args.out) if args.out else BUNDLED_CATALOG
+        write_bundled_catalog(cat, out)
+        print(f"wrote {len(cat.models)} models and {len(cat.scenes)} scenes to {out}")
     elif args.cmd == "fake-game":
         from splitter.devtools.fake_game import run_fake_game
 

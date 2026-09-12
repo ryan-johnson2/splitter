@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
+from splitter.core import quads
 from splitter.db import repos
 from splitter.web.templating import redirect_with_flash, templates
 
@@ -39,7 +40,7 @@ async def race_page(request: Request, race_id: int) -> Any:
         race = await repos.get_race(db, race_id)
         if race is None:
             raise HTTPException(404)
-        best = await repos.get_best_race(db, race.track_name, race.quad_type, race.race_laps)
+        best = await repos.get_best_race(db, repos.race_key(race))
         reference = repos.reference_from_race(best) if best and best.id != race.id else None
         samples = await repos.telemetry_for_race(db, race_id)
     gate_rows = []
@@ -74,6 +75,24 @@ async def race_page(request: Request, race_id: int) -> Any:
     )
 
 
+def _identity_fields(
+    track_id: int, scene_id: int, track_source: str, quad_model_id: int, quad_class_id: int
+) -> dict[str, Any]:
+    """Picker ids to apply; ids are only touched when a pick was made (> 0)."""
+    out: dict[str, Any] = {}
+    if track_id > 0:
+        out.update(track_id=track_id, scene_id=max(0, scene_id), track_source=track_source.strip())
+    if quad_model_id > 0:
+        model = quads.catalog().model(quad_model_id)
+        out.update(
+            quad_model_id=quad_model_id,
+            quad_class_id=quad_class_id or (model.component_group_id if model else 0),
+        )
+        if model:
+            out["quad_type"] = model.name
+    return out
+
+
 @router.post("/{race_id}/edit")
 async def race_edit(
     request: Request,
@@ -84,18 +103,23 @@ async def race_edit(
     quad_size: str = Form(""),
     race_laps: int = Form(0),
     notes: str = Form(""),
+    track_id: int = Form(0),
+    scene_id: int = Form(0),
+    track_source: str = Form(""),
+    quad_model_id: int = Form(0),
+    quad_class_id: int = Form(0),
 ) -> Any:
+    fields: dict[str, Any] = {
+        "track_name": track_name.strip(),
+        "scenery": scenery.strip(),
+        "quad_type": quad_type.strip(),
+        "quad_size": quad_size.strip(),
+        "race_laps": race_laps,
+        "notes": notes.strip(),
+    }
+    fields.update(_identity_fields(track_id, scene_id, track_source, quad_model_id, quad_class_id))
     async with request.app.state.session_factory() as db:
-        race = await repos.update_race(
-            db,
-            race_id,
-            track_name=track_name.strip(),
-            scenery=scenery.strip(),
-            quad_type=quad_type.strip(),
-            quad_size=quad_size.strip(),
-            race_laps=race_laps,
-            notes=notes.strip(),
-        )
+        race = await repos.update_race(db, race_id, **fields)
     if race is None:
         raise HTTPException(404)
     return redirect_with_flash(f"/races/{race_id}", notice="Race updated.")
@@ -118,6 +142,11 @@ async def races_bulk(
     track_name: str = Form(""),
     quad_type: str = Form(""),
     scenery: str = Form(""),
+    track_id: int = Form(0),
+    scene_id: int = Form(0),
+    track_source: str = Form(""),
+    quad_model_id: int = Form(0),
+    quad_class_id: int = Form(0),
 ) -> Any:
     if not race_ids:
         return redirect_with_flash("/races", error="Nothing selected.")
@@ -133,6 +162,9 @@ async def races_bulk(
             fields["quad_type"] = quad_type.strip()
         if scenery.strip():
             fields["scenery"] = scenery.strip()
+        fields.update(
+            _identity_fields(track_id, scene_id, track_source, quad_model_id, quad_class_id)
+        )
         if not fields:
             return redirect_with_flash("/races", error="Nothing to change.")
         for rid in race_ids:

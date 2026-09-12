@@ -35,8 +35,12 @@ racestatus:start → armed
 racetype         → race mode / format / laps (the only SP info about the run)
 countdown 3..0   → 0 = GO: Race row created, PB reference loaded
 FinishGate       → track-shape flag (has a distinct start/finish gate)
-racedata …       → one crossing per new (lap, gate); a lap closes on the first
-                   snapshot with a higher lap number; finished:"True" ends it
+racedata …       → one crossing per new (lap, gate). The lap counter increments
+                   at the start/finish gate: GO → first S/F crossing is the
+                   **holeshot** (in the total, not a lap); lap n runs from the
+                   first lap-n crossing to the first lap-(n+1) crossing;
+                   finished:"True" ends the last lap. Verified against the
+                   game's own lap times (core/timing.py docstring).
 racestatus:"race finished" / "abort"
 ```
 
@@ -50,11 +54,29 @@ racestatus:"race finished" / "abort"
   `sticky` (carried over from the last run, persisted in settings as
   `last_*`), or `manual` (the "Track…" dialog on the live page, `POST
   /api/session`). Runs record `session_source`, and the Races page has bulk
-  edit to fix mis-attributed runs. Whether Nemesis mode emits anything extra
-  is unknown — the Protocol page (raw frame log, `event_log` table) exists to
-  answer that.
-- PBs are per **(track, quad, race_laps)**. `is_best` is re-flagged on finish,
-  edit and delete (`repos.recalculate_best`).
+  edit to fix mis-attributed runs. **Nemesis mode emits nothing extra**
+  (verified 2026-09-12 with the Protocol page: the same frames as any SP race,
+  no track name anywhere), so there is no automatic route in SP.
+- The "Track…" dialog is a **picker** over the game's online track lists
+  (`game/catalog.py::TrackCatalog`, `GET /api/tracks/search?q=&source=`),
+  the same endpoints Marshal's event form uses via the sibling
+  `velocidrone-api` library. Neither `get_official_tracks` nor
+  `rated_tracks_list` needs credentials, so Splitter calls them anonymously.
+  **A pick is required**: `POST /api/session` rejects a session without a
+  `track_id`. Hosted-room `session` events (names only) are resolved to an id
+  by exact name (`TrackCatalog.resolve`, official first); unresolved runs get
+  `track_id` 0 and never become PBs. The same widget (`static/picker.js`) is on
+  the race edit and bulk-edit forms to re-attribute runs.
+- **Quads** come from the bundled game catalog (`core/quads.py`,
+  `data/catalog.json` — the same snapshot Marshal ships: `models` +
+  `sceneries` from the game's `settings.db`; refresh with
+  `splitter extract-catalog <settings.db>`). The dialog offers class → model
+  selects (`GET /api/quads`); the game's `quadType` string is matched to a
+  model by exact name. Scene ids from the online lists get their names from
+  the same catalog.
+- PBs are per **`PBKey(track_id, quad_model_id, race_laps)`** (`db/repos.py`);
+  `track_id` 0 is never a PB or a reference. `is_best` is re-flagged on finish,
+  edit and delete (`repos.recalculate_best`). Names on races are display only.
 - Which racedata entry is "me": the `player_name` setting, else the only
   pilot, else skip with a one-time notice.
 
@@ -98,13 +120,14 @@ docker compose --profile dev run --rm test mypy src
 ```
 
 The build context is the parent directory so the image can install the sibling
-`velocidrone-libraries/velocidrone-websocket`. Never hit a real game from tests.
+`velocidrone-libraries/velocidrone-websocket` and `velocidrone-api`. Never hit a
+real game or the online API from tests (`app.state.catalog` takes a fake).
 
 Exercise the whole pipeline without the game:
 `splitter fake-game --port 60003 --loop [--no-session] [--speed 5]` (a
 scripted server speaking the real wire shapes), then set the game address to
 that host on the Settings page.
 
-Deploy: `deploy/lxc/` (bundle = both wheels + installer + unit; `install.sh`
+Deploy: `deploy/lxc/` (bundle = all three wheels + installer + unit; `install.sh`
 is idempotent and is the upgrade path). Docker: `docker compose up -d`, data in
 `./data`, port 8100.

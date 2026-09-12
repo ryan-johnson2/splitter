@@ -39,31 +39,47 @@ async def test_full_race_persists_and_broadcasts(
     await fly(controller)
     msgs = h.drain(q)
     kinds = [m["type"] for m in msgs]
-    assert kinds[:2] == ["session", "armed"]
+    assert kinds[:3] == ["session", "reference", "armed"]
     assert "race_started" in kinds and kinds[-1] == "race_finished"
     assert kinds.count("crossing") == 8
     assert kinds.count("countdown") == 4
 
     result = msgs[-1]["data"]
-    assert result["status"] == "finished" and result["total_ms"] == 16000
-    assert result["total_laps"] == 2 and result["gates_per_lap"] == 4
+    assert result["status"] == "finished" and result["total_ms"] == 14000
+    assert result["total_laps"] == 2 and result["gates_per_lap"] == 3
+    assert result["holeshot_ms"] == 2000
     assert result["is_best"] is True and result["pb_delta_ms"] is None  # first run: no reference
 
     async with session_factory() as db:
         race = (await db.execute(select(Race))).scalar_one()
         assert race.track_name == "Practice Loop" and race.quad_type == "Source One"
+        assert race.track_id == 500 and race.scene_id == 29 and race.quad_model_id == 0
         assert race.race_laps == 3 and race.race_mode == "THREE_LAP_SINGLE_CLASS"
         assert race.session_source == "game" and race.player_name == "Ryan"
         assert race.start_finish_gate is True
-        assert race.status == "finished" and race.total_time_ms == 16000 and race.is_best
+        assert race.status == "finished" and race.total_time_ms == 14000 and race.is_best
+        assert race.holeshot_ms == 2000
         gates = (await db.execute(select(GateTime).order_by(GateTime.seq))).scalars().all()
-        assert [g.cumulative_ms for g in gates] == [2000 * (i + 1) for i in range(8)]
-        assert gates[3].ends_lap == 1 and gates[7].ends_lap == 2
+        assert [g.cumulative_ms for g in gates] == [
+            1000,
+            2000,
+            4000,
+            6000,
+            8000,
+            10000,
+            12000,
+            14000,
+        ]
+        assert gates[4].ends_lap == 1 and gates[7].ends_lap == 2
+        assert [g.ends_lap for g in gates[:4]] == [None] * 4
         laps = (await db.execute(select(Lap).order_by(Lap.lap))).scalars().all()
-        assert [(lap.lap, lap.lap_ms) for lap in laps] == [(1, 8000), (2, 8000)]
+        assert [(lap.lap, lap.lap_ms) for lap in laps] == [(1, 6000), (2, 6000)]
         assert (await db.execute(select(EventLog))).scalars().first() is not None
     assert not controller.race_active
     assert controller.session.source == "sticky"  # carried to the next run
+    # Between runs the reference is the PB the next run will be measured against.
+    assert result["next_reference"]["race_id"] == 1
+    assert controller.snapshot()["reference"]["race_id"] == 1
 
 
 async def test_second_run_gets_splits_against_pb(
@@ -75,12 +91,12 @@ async def test_second_run_gets_splits_against_pb(
     await fly(controller, scale=0.9)  # 10% faster everywhere
     msgs = h.drain(q)
     started = next(m for m in msgs if m["type"] == "race_started")["data"]
-    assert started["reference"]["race_id"] == 1 and started["reference"]["total_ms"] == 16000
+    assert started["reference"]["race_id"] == 1 and started["reference"]["total_ms"] == 14000
     crossings = [m["data"] for m in msgs if m["type"] == "crossing"]
-    assert crossings[0]["split_ms"] == -200 and crossings[0]["gate_delta_ms"] == -200
-    assert crossings[3]["lap_done"]["delta_ms"] == -800
+    assert crossings[0]["split_ms"] == -100 and crossings[0]["gate_delta_ms"] == -100
+    assert crossings[4]["lap_done"]["delta_ms"] == -600
     result = msgs[-1]["data"]
-    assert result["pb_delta_ms"] == -1600 and result["is_best"]
+    assert result["pb_delta_ms"] == -1400 and result["is_best"]
     async with session_factory() as db:
         first = await db.get(Race, 1)
         second = await db.get(Race, 2)
@@ -90,7 +106,7 @@ async def test_second_run_gets_splits_against_pb(
         gate = (
             await db.execute(select(GateTime).where(GateTime.race_id == 2, GateTime.seq == 7))
         ).scalar_one()
-        assert gate.split_ms == -1600
+        assert gate.split_ms == -1400
 
 
 async def test_abort_before_any_gate_drops_the_row(
@@ -146,6 +162,7 @@ async def test_sticky_session_survives_restart(
     fresh.load_sticky_session()
     assert fresh.session.track_name == "Sticky Track" and fresh.session.source == "sticky"
     assert fresh.session.race_laps == 3
+    assert fresh.session.track_id == 501 and fresh.session.track_source == "official"
 
 
 async def test_picks_me_among_several_pilots(
@@ -187,13 +204,13 @@ async def test_telemetry_is_stored_and_summarised(
     assert crossing["max_speed"] == 20.0 and crossing["distance_m"] is not None
     async with session_factory() as db:
         race = (await db.execute(select(Race))).scalar_one()
-        assert race.max_speed == 20.0 and race.distance_m and 300 < race.distance_m < 330
+        assert race.max_speed == 20.0 and race.distance_m and 260 < race.distance_m < 290
         samples = (await db.execute(select(TelemetrySample))).scalars().all()
-        # 16 s at 20 Hz storage.
-        assert 300 <= len(samples) <= 330
+        # 14 s at 20 Hz storage.
+        assert 260 <= len(samples) <= 290
         lap = (await db.execute(select(Lap).where(Lap.lap == 1))).scalar_one()
         assert lap.max_speed == 20.0
-    assert controller.imu_frames > 900
+    assert controller.imu_frames > 800
 
 
 async def test_imu_outside_a_race_is_not_stored(controller: RaceController) -> None:
@@ -213,3 +230,26 @@ async def test_new_start_while_running_aborts_previous(
     async with session_factory() as db:
         races = (await db.execute(select(Race).order_by(Race.id))).scalars().all()
         assert [r.status for r in races] == ["aborted", "running"]
+
+
+async def test_reference_follows_the_session(
+    controller: RaceController, hub: LiveHub, settings, session_factory
+) -> None:
+    await controller.handle_event(h.session())
+    assert controller.snapshot()["reference"] is None
+    await fly(controller)
+    assert controller.snapshot()["reference"]["race_id"] == 1
+    # A different quad is a different PB group: no reference.
+    q = hub.subscribe()
+    await controller.set_manual_session(
+        "Practice Loop", track_id=500, race_laps=3, quad_model_id=108
+    )
+    kinds = [m["type"] for m in h.drain(q)]
+    assert kinds == ["session", "reference"] and controller.snapshot()["reference"] is None
+    await controller.set_manual_session("Practice Loop", track_id=500, race_laps=3)
+    assert controller.snapshot()["reference"]["race_id"] == 1
+    # A restart reloads it from the sticky session.
+    fresh = RaceController(settings, session_factory, hub)
+    fresh.load_sticky_session()
+    await fresh.refresh_reference()
+    assert fresh.snapshot()["reference"]["race_id"] == 1

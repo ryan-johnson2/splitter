@@ -10,12 +10,34 @@ from httpx import ASGITransport, AsyncClient
 
 from splitter.app import create_app
 from splitter.config import Config
+from splitter.game.catalog import SearchResult, TrackRef
 from tests import helpers as h
+from tests.conftest import fake_resolve
+
+
+class _FakeCatalog:
+    """Stands in for TrackCatalog: no network, canned results, records calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, int]] = []
+
+    async def search(self, q: str, source: str = "", limit: int = 30) -> SearchResult:
+        self.calls.append((q, source, limit))
+        res = SearchResult()
+        if q:
+            res.tracks = [
+                TrackRef("community", 40001, 16, "USADT Champs Trial 01", "Intermediate", "x")
+            ]
+        return res
+
+    async def resolve(self, name: str) -> TrackRef | None:
+        return await fake_resolve(name)
 
 
 @pytest.fixture
 async def client(tmp_path: Any) -> AsyncIterator[AsyncClient]:
     app = create_app(Config(database_url=f"sqlite+aiosqlite:///{tmp_path}/web.db"))
+    app.state.catalog = _FakeCatalog()
     async with app.router.lifespan_context(app):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as c:
@@ -57,10 +79,17 @@ async def test_settings_roundtrip(client: AsyncClient) -> None:
 
 
 async def test_manual_session_and_state(client: AsyncClient) -> None:
+    # A typed name alone is refused: PBs need the online track id.
     r = await client.post(
         "/api/session", json={"track_name": "Loop", "quad_type": "Ape", "race_laps": 3}
     )
+    assert r.status_code == 400 and "online id" in r.json()["detail"]
+    r = await client.post(
+        "/api/session",
+        json={"track_name": "Loop", "track_id": 77, "quad_type": "Ape", "race_laps": 3},
+    )
     assert r.status_code == 200 and r.json()["source"] == "manual"
+    assert r.json()["identified"] is True
     state = (await client.get("/api/state")).json()
     assert state["session"]["track_name"] == "Loop" and state["race"] is None
     assert (await client.post("/api/session", json={"track_name": " "})).status_code == 400
@@ -84,7 +113,7 @@ async def test_race_pages_after_a_run(client: AsyncClient) -> None:
         "/races",
         "/races/1",
         "/tracks",
-        "/tracks/detail?track=Practice%20Loop&quad=Source%20One&laps=3",
+        "/tracks/detail?track_id=500&quad_model=0&laps=3",
         "/protocol",
         "/protocol?type=racedata",
     ):
@@ -92,14 +121,36 @@ async def test_race_pages_after_a_run(client: AsyncClient) -> None:
         assert r.status_code == 200, path
     assert "Practice Loop" in (await client.get("/races")).text
     assert "personal best" in (await client.get("/races/1")).text
+    assert races[0]["track_id"] == 500 and races[0]["track_source"] == "community"
+    tracks_page = (await client.get("/tracks")).text
+    assert "track_id=500" in tracks_page and "#500" in tracks_page
 
+    # Edit: names alone keep the ids; a pick (> 0) re-attributes and re-flags PBs.
     r = await client.post(
         "/races/1/edit",
         data={"track_name": "Renamed", "quad_type": "Source One", "race_laps": "3"},
         follow_redirects=False,
     )
     assert r.status_code == 303
-    assert (await client.get("/api/races/1")).json()["track_name"] == "Renamed"
+    d = (await client.get("/api/races/1")).json()
+    assert d["track_name"] == "Renamed" and d["track_id"] == 500 and d["is_best"]
+    r = await client.post(
+        "/races/1/edit",
+        data={
+            "track_name": "Renamed",
+            "race_laps": "3",
+            "track_id": "900",
+            "scene_id": "8",
+            "track_source": "official",
+            "quad_model_id": "1",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    d = (await client.get("/api/races/1")).json()
+    assert d["track_id"] == 900 and d["scene_id"] == 8 and d["track_source"] == "official"
+    assert d["quad_model_id"] == 1 and d["quad_class_id"] == 1 and d["quad_type"] == "Gravity 250"
+    assert d["is_best"]  # still the only finished run in its (new) group
 
     r = await client.post("/races/1/delete", follow_redirects=False)
     assert r.status_code == 303
@@ -114,3 +165,109 @@ async def test_connection_endpoint_requires_host(client: AsyncClient) -> None:
     assert r.status_code == 200 and r.json()["host"] == "10.0.0.5"
     r = await client.post("/api/connection", json={"action": "disconnect"})
     assert r.status_code == 200
+
+
+async def test_track_search_endpoint(client: AsyncClient) -> None:
+    fake = _FakeCatalog()
+    client.app.state.catalog = fake  # type: ignore[attr-defined]
+    r = await client.get("/api/tracks/search", params={"q": "usadt", "source": "community"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["errors"] == {}
+    assert body["tracks"][0] == {
+        "source": "community",
+        "track_id": 40001,
+        "scene_id": 16,
+        "name": "USADT Champs Trial 01",
+        "kind": "Intermediate",
+        "author": "x",
+        "scenery": "Empty Scene Day",
+    }
+    assert fake.calls == [("usadt", "community", 30)]
+    r = await client.get("/api/tracks/search", params={"q": "", "limit": "500"})
+    assert r.json() == {"tracks": [], "errors": {}}
+    assert fake.calls[-1] == ("", "", 100)
+
+
+async def test_session_with_picked_track_persists_ids(client: AsyncClient) -> None:
+    r = await client.post(
+        "/api/session",
+        json={
+            "track_name": "USADT Champs Trial 01",
+            "scenery": "Empty Scene Day",
+            "track_id": 40001,
+            "scene_id": 16,
+            "track_source": "community",
+            "race_laps": 3,
+        },
+    )
+    assert r.status_code == 200
+    s = r.json()
+    assert s["track_id"] == 40001 and s["scene_id"] == 16 and s["track_source"] == "community"
+    assert s["source"] == "manual" and s["known"] is True
+    settings = client.app.state.settings  # type: ignore[attr-defined]
+    assert (
+        settings.get("last_track_id") == "40001"
+        and settings.get("last_track_source") == "community"
+    )
+    # An unknown source is ignored; a hand-typed name without an id is refused.
+    r = await client.post(
+        "/api/session", json={"track_name": "Typed", "track_id": 5, "track_source": "bogus"}
+    )
+    assert r.json()["track_source"] == ""
+    r = await client.post("/api/session", json={"track_name": "Typed"})
+    assert r.status_code == 400
+
+
+async def test_quads_endpoint_and_session_quad(client: AsyncClient) -> None:
+    body = (await client.get("/api/quads")).json()
+    assert body["classes"][0]["class_name"] == "Racing"
+    gemfan = next(
+        m for c in body["classes"] for m in c["models"] if m["name"] == "Armattan Chameleon"
+    )
+    r = await client.post(
+        "/api/session",
+        json={"track_name": "T", "track_id": 1, "quad_model_id": gemfan["model_id"]},
+    )
+    s = r.json()
+    assert s["quad_type"] == "Armattan Chameleon" and s["quad_class_id"] == 1
+    settings = client.app.state.settings  # type: ignore[attr-defined]
+    assert settings.get("last_quad_model_id") == str(gemfan["model_id"])
+
+
+async def test_unresolved_game_session_never_sets_a_pb(client: AsyncClient) -> None:
+    controller = client.app.state.controller  # type: ignore[attr-defined]
+    await controller.handle_event(h.session(track="Mystery Track"))
+    assert controller.session.track_id == 0 and controller.session.identified is False
+    await controller.handle_event(h.status("start"))
+    await controller.handle_event(h.countdown(0))
+    for lap, gate, t, fin in h.two_lap_race():
+        await controller.handle_event(h.racedata(lap, gate, t, fin))
+    await controller.handle_event(h.status("race finished"))
+    races = (await client.get("/api/races")).json()
+    assert races[0]["status"] == "finished" and races[0]["is_best"] is False
+    assert "no id" in (await client.get("/races")).text
+    r = await client.get("/tracks/detail?track_id=0&quad_model=0&laps=3&track=Mystery%20Track")
+    assert r.status_code == 200 and "no online id" in r.text
+
+
+async def test_time_format_setting(client: AsyncClient) -> None:
+    from splitter.core.timeparse import format_ms
+
+    assert format_ms(144359) == "144.359" and format_ms(144359, "mmss") == "2:24.359"
+    assert format_ms(144359, "both") == "2:24.359 (144.359)"
+    assert format_ms(47005, "both") == "47.005" and format_ms(None) == "--"
+    page = (await client.get("/settings")).text
+    assert 'name="time_format"' in page and 'window.SPLITTER_TIME_FORMAT = "seconds"' in page
+    r = await client.post(
+        "/settings",
+        data={
+            "game_host": "",
+            "game_port": "60003",
+            "brand_name": "Splitter",
+            "time_format": "mmss",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert 'window.SPLITTER_TIME_FORMAT = "mmss"' in (await client.get("/")).text

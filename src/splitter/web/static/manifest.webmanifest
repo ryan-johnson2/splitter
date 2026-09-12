@@ -1,0 +1,14 @@
+{
+  "name": "Splitter",
+  "short_name": "Splitter",
+  "description": "VelociDrone lap timer",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#0b0f14",
+  "theme_color": "#0b0f14",
+  "icons": [
+    { "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

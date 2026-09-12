@@ -9,6 +9,7 @@ description = "Splitter — personal VelociDrone lap timer: gate-by-gate splits,
 requires-python = ">=3.11"
 dependencies = [
     "velocidrone-ws",
+    "velocidrone-api",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "jinja2>=3.1",
@@ -35,6 +36,7 @@ dependencies = [
 ]
 pre-install-commands = [
     "pip install -e ../velocidrone-libraries/velocidrone-websocket",
+    "pip install -e ../velocidrone-libraries/velocidrone-api",
 ]
 
 [tool.hatch.envs.default.scripts]

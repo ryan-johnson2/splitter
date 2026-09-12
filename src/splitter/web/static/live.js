@@ -5,11 +5,7 @@
   var state = { race: null, reference: null, session: null, lastCrossing: null, phase: "idle", speed: 0, ws: null, connected: false, lastResult: null };
   var timer = null;
 
-  function fmt(ms) {
-    if (ms == null || ms < 0) return "--";
-    var m = Math.floor(ms / 60000), s = (ms % 60000) / 1000;
-    return m ? m + ":" + s.toFixed(3).padStart(6, "0") : s.toFixed(3);
-  }
+  var fmt = Splitter.fmt;  // honours the Settings "Time format"
   function fmtDelta(ms) { if (ms == null) return "--"; return (ms < 0 ? "-" : "+") + (Math.abs(ms) / 1000).toFixed(3); }
   function deltaClass(ms) { return ms == null ? "" : ms < 0 ? "ahead" : ms > 0 ? "behind" : ""; }
   function setDelta(el, ms) { el.textContent = fmtDelta(ms); el.className = el.className.replace(/\b(ahead|behind)\b/g, "").trim() + " " + deltaClass(ms); }
@@ -32,7 +28,7 @@
 
   function renderSession(s) {
     state.session = s;
-    var line = s && s.known ? "<b>" + esc(s.track_name) + "</b>" + (s.scenery ? " · " + esc(s.scenery) : "") + (s.quad_type ? " · " + esc(s.quad_type) : "") + (s.race_laps ? " · " + s.race_laps + " laps" : "") + (s.source ? ' <span class="muted small">(' + s.source + ")</span>" : "")
+    var line = s && s.known ? "<b>" + esc(s.track_name) + "</b>" + (s.scenery ? " · " + esc(s.scenery) : "") + (s.quad_type ? " · " + esc(s.quad_type) : "") + (s.race_laps ? " · " + s.race_laps + " laps" : "") + (s.source ? ' <span class="muted small">(' + s.source + ")</span>" : "") + (s.identified ? "" : ' <span class="pill bad" title="no online track id: this run will not count as a PB">no id</span>')
       : '<span class="muted">no track set — tap “Track…”</span>';
     $("session-line").innerHTML = line;
   }
@@ -49,13 +45,15 @@
 
   function renderReference(ref) {
     state.reference = ref;
-    $("ref-line").textContent = ref ? "vs PB " + fmt(ref.total_ms) + " (#" + ref.race_id + ")" : (state.session && state.session.known ? "No PB yet on this track/quad — this run sets it" : "");
+    var s = state.session || {};
+    $("ref-line").textContent = ref ? "vs PB " + fmt(ref.total_ms) + " (#" + ref.race_id + ")"
+      : !s.known ? "" : !s.identified ? "No online track id — runs here won't count as PBs" : "No PB yet for this track, quad and lap count — a finished run sets it";
   }
 
   function resetRaceView() {
     $("race-time").textContent = "0.000"; $("lap-time").textContent = "0.000";
     $("split").innerHTML = "&nbsp;"; $("split").className = "big-delta";
-    $("lap-no").textContent = "1"; $("gate-no").textContent = "–"; $("last-gate").textContent = "–";
+    $("lap-no").textContent = "HS"; $("gate-no").textContent = "–"; $("last-gate").textContent = "–";
     $("last-lap").textContent = "–"; $("last-lap-delta").textContent = "–"; $("last-lap-delta").className = "";
     $("gate-rows").innerHTML = "";
     $("result-card").hidden = true;
@@ -72,7 +70,7 @@
 
   function applyCrossing(c) {
     state.lastCrossing = c;
-    $("lap-no").textContent = c.ends_lap && !c.finished ? c.ends_lap + 1 : c.lap;
+    $("lap-no").textContent = c.lap ? c.lap : "HS";  // lap 0 = holeshot, before the first start/finish crossing
     $("gate-no").textContent = c.gate;
     $("last-gate").textContent = fmt(c.gate_ms);
     setDelta($("split"), c.split_ms);
@@ -124,6 +122,7 @@
     if (r.pb_delta_ms != null && !r.aborted) { setDelta(d, r.pb_delta_ms); d.textContent += " vs PB"; } else { d.innerHTML = "&nbsp;"; d.className = "big-delta"; }
     $("result-link").href = "/races/" + r.id;
     var laps = $("result-laps"); laps.innerHTML = "";
+    if (r.holeshot_ms != null) { var hs = document.createElement("div"); hs.className = "kv"; hs.innerHTML = "Holeshot<b>" + fmt(r.holeshot_ms) + "</b>"; laps.appendChild(hs); }
     (r.laps || []).forEach(function (l) {
       var div = document.createElement("div"); div.className = "kv";
       div.innerHTML = "Lap " + l.lap + "<b>" + fmt(l.lap_ms) + (l.delta_ms != null ? ' <span class="small ' + deltaClass(l.delta_ms) + '">' + fmtDelta(l.delta_ms) + "</span>" : "") + "</b>";
@@ -144,7 +143,8 @@
   var handlers = {
     snapshot: applySnapshot,
     status: renderConnection,
-    session: renderSession,
+    session: function (s) { renderSession(s); renderReference(state.reference); },
+    reference: renderReference,
     player: function () {},
     armed: function (d) { renderSession(d.session); setPhase("armed"); resetRaceView(); $("gate-rows").innerHTML = ""; },
     countdown: function (d) { $("countdown").textContent = d.count === 0 ? "GO" : d.count; setPhase(d.count === 0 ? "racing" : "countdown"); },
@@ -152,7 +152,8 @@
     crossing: function (c) {
       if (!state.race) { state.race = { id: 0, crossings: [], laps: [], total_ms: 0, lap_start_ms: 0, finished: false }; setPhase("racing"); }
       state.race.total_ms = c.cumulative_ms;
-      if (c.lap_done) { state.race.laps.push(c.lap_done); state.race.lap_start_ms = c.cumulative_ms; }
+      if (c.lap_done) state.race.laps.push(c.lap_done);
+      if (c.starts_lap) { state.race.lap_start_ms = c.cumulative_ms; state.race.current_lap = c.starts_lap; if (!state.race.holeshot_ms && c.starts_lap === 1) state.race.holeshot_ms = c.cumulative_ms; }
       state.race.crossings.push(c);
       applyCrossing(c);
       resync(c.cumulative_ms);
@@ -165,6 +166,7 @@
       $("race-time").textContent = r.aborted ? $("race-time").textContent : fmt(r.total_ms);
       setPhase(r.aborted ? "aborted" : "finished");
       renderResult(r);
+      if (r.next_reference !== undefined) renderReference(r.next_reference);
       if (r.is_best) toast("New PB on " + r.track_name + ": " + fmt(r.total_ms), "ok");
       state.race = null;
     },
@@ -189,14 +191,20 @@
 
   // ── session dialog ────────────────────────────────────────────
   var dlg = $("session-dialog");
+  var trackPicker = Splitter.trackPicker($("track-picker"), { recent: [] });
+  var quadPicker = Splitter.quadPicker($("quad-picker"));
+
   $("btn-session").onclick = function () {
     var s = state.session || {};
-    $("f-track").value = s.track_name || ""; $("f-scenery").value = s.scenery || ""; $("f-quad").value = s.quad_type || ""; $("f-size").value = s.quad_size || ""; $("f-laps").value = s.race_laps || "";
+    trackPicker.set({ track_name: s.track_name || "", scenery: s.scenery || "", track_id: s.track_id || 0, scene_id: s.scene_id || 0, track_source: s.track_source || "" });
+    $("f-size").value = s.quad_size || ""; $("f-laps").value = s.race_laps || "";
+    quadPicker.set(s.quad_model_id || 0, s.quad_class_id || 0);
     fetch("/api/races?limit=200").then(function (r) { return r.json(); }).then(function (rows) {
-      var tracks = {}, quads = {};
-      rows.forEach(function (r) { if (r.track_name) tracks[r.track_name] = r.scenery; if (r.quad_type) quads[r.quad_type] = r.quad_size; });
-      $("track-list").innerHTML = Object.keys(tracks).map(function (t) { return "<option value=\"" + esc(t) + "\">"; }).join("");
-      $("quad-list").innerHTML = Object.keys(quads).map(function (q) { return "<option value=\"" + esc(q) + "\">"; }).join("");
+      var seen = {}, recent = [];
+      rows.forEach(function (r) {
+        if (r.track_id && !seen[r.track_id]) { seen[r.track_id] = 1; recent.push({ track_name: r.track_name, scenery: r.scenery, track_id: r.track_id, scene_id: r.scene_id, track_source: r.track_source }); }
+      });
+      trackPicker.setRecent(recent); trackPicker.showRecent();
     }).catch(function () {});
     dlg.showModal();
   };
@@ -204,12 +212,25 @@
   $("session-form").onsubmit = function (ev) {
     ev.preventDefault();
     var fd = new FormData(ev.target);
-    var body = { track_name: fd.get("track_name"), scenery: fd.get("scenery"), quad_type: fd.get("quad_type"), quad_size: fd.get("quad_size"), race_laps: parseInt(fd.get("race_laps") || "0", 10) || 0 };
+    var body = { track_name: fd.get("track_name"), scenery: fd.get("scenery"), quad_type: fd.get("quad_type"), quad_size: fd.get("quad_size"), race_laps: parseInt(fd.get("race_laps") || "0", 10) || 0,
+                 track_id: parseInt(fd.get("track_id") || "0", 10) || 0, scene_id: parseInt(fd.get("scene_id") || "0", 10) || 0, track_source: fd.get("track_source") || "",
+                 quad_model_id: parseInt(fd.get("quad_model_id") || "0", 10) || 0, quad_class_id: parseInt(fd.get("quad_class_id") || "0", 10) || 0 };
+    if (!body.track_id) { toast("Pick the track from the search — PBs need its online id", "warn"); return; }
     fetch("/api/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
-      .then(function (r) { if (!r.ok) throw new Error("save failed"); return r.json(); })
+      .then(function (r) { if (!r.ok) return r.json().then(function (j) { throw new Error(j.detail || "save failed"); }); return r.json(); })
       .then(function () { dlg.close(); toast("Track set", "ok"); })
       .catch(function (e) { toast(e.message, "bad"); });
   };
+  // Fullscreen (tablet): the Fullscreen API works over plain http on the LAN,
+  // unlike "install as app", which needs https.
+  var fsBtn = $("btn-fullscreen");
+  if (!document.documentElement.requestFullscreen) fsBtn.hidden = true;
+  fsBtn.onclick = function () {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen({ navigationUI: "hide" }).catch(function () { toast("Fullscreen refused by the browser", "warn"); });
+  };
+  document.addEventListener("fullscreenchange", function () { fsBtn.textContent = document.fullscreenElement ? "🡼" : "⛶"; fsBtn.title = document.fullscreenElement ? "leave fullscreen" : "fullscreen"; });
+
   $("btn-reconnect").onclick = function () {
     fetch("/api/connection", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "connect" }) })
       .then(function (r) { if (!r.ok) return r.json().then(function (j) { throw new Error(j.detail || "failed"); }); toast("Reconnecting…"); })

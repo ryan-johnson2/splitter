@@ -36,6 +36,12 @@
 <div class="card">
   <h2>About</h2>
   <div class="field"><label for="brand_name">Name in the header</label><input id="brand_name" name="brand_name" value="{{ values.brand_name }}"></div>
+  <div class="field"><label for="time_format">Time format</label>
+    <select id="time_format" name="time_format">
+      {% for key, label in time_formats.items() %}<option value="{{ key }}" {% if values.time_format == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    <p class="help">VelociDrone shows plain seconds; pick that to compare at a glance, or minutes for long runs.</p>
+  </div>
   <p class="small muted">{{ brand_name }} v{{ app_version }}</p>
 </div>
 

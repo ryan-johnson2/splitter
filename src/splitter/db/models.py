@@ -26,13 +26,24 @@ class Race(Base):
     """One run from GO to finish/abort."""
 
     __tablename__ = "races"
-    __table_args__ = (Index("ix_races_track_quad", "track_name", "quad_type", "race_laps"),)
+    __table_args__ = (
+        Index("ix_races_track_quad", "track_name", "quad_type", "race_laps"),
+        Index("ix_races_pb_key", "track_id", "quad_model_id", "race_laps"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     track_name: Mapped[str] = mapped_column(default="")
     scenery: Mapped[str] = mapped_column(default="")
+    # Online track identity when the session came from the picker (else 0 / "").
+    track_id: Mapped[int] = mapped_column(default=0)
+    scene_id: Mapped[int] = mapped_column(default=0)
+    track_source: Mapped[str] = mapped_column(default="")  # official | community
     quad_type: Mapped[str] = mapped_column(default="")
     quad_size: Mapped[str] = mapped_column(default="")
+    # Catalog identity of the quad (0 when unknown). PBs are keyed by
+    # (track_id, quad_model_id, race_laps); a race with track_id 0 never is one.
+    quad_model_id: Mapped[int] = mapped_column(default=0)
+    quad_class_id: Mapped[int] = mapped_column(default=0)
     race_mode: Mapped[str] = mapped_column(default="")  # e.g. THREE_LAP_SINGLE_CLASS
     race_format: Mapped[str] = mapped_column(default="")  # e.g. NORMAL
     race_laps: Mapped[int] = mapped_column(default=0)
@@ -44,6 +55,7 @@ class Race(Base):
     started_at: Mapped[datetime]
     ended_at: Mapped[datetime | None]
     total_time_ms: Mapped[int | None]
+    holeshot_ms: Mapped[int | None]  # GO → first start/finish crossing (in the total, not a lap)
     total_laps: Mapped[int] = mapped_column(default=0)
     gates_per_lap: Mapped[int | None]
     is_best: Mapped[bool] = mapped_column(default=False)

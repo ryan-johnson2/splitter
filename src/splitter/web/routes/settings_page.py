@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
+from splitter.core.timeparse import TIME_FORMATS
 from splitter.web.templating import redirect_with_flash, templates
 
 router = APIRouter(prefix="/settings")
@@ -20,6 +21,7 @@ async def settings_page(request: Request) -> Any:
         "settings.html",
         {
             "values": state.settings.all(),
+            "time_formats": TIME_FORMATS,
             "bridge": state.bridge.status(),
             "controller": state.controller,
         },
@@ -38,6 +40,7 @@ async def settings_save(
     event_log_enabled: str = Form("0"),
     event_log_keep: int = Form(5000),
     brand_name: str = Form("Splitter"),
+    time_format: str = Form("seconds"),
 ) -> Any:
     state = request.app.state
     settings = state.settings
@@ -51,6 +54,7 @@ async def settings_save(
         "event_log_enabled": "1" if event_log_enabled == "1" else "0",
         "event_log_keep": str(max(100, event_log_keep)),
         "brand_name": brand_name.strip() or "Splitter",
+        "time_format": time_format if time_format in TIME_FORMATS else "seconds",
     }
     host_changed = values["game_host"] != settings.get("game_host") or values[
         "game_port"

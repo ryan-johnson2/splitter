@@ -49,6 +49,8 @@ mapfile -t WHEELS < <(compgen -G "$WHEEL_DIR/*.whl" || true)
 [[ ${#WHEELS[@]} -gt 0 ]] || die "no wheels in $WHEEL_DIR"
 compgen -G "$WHEEL_DIR/velocidrone_ws-*.whl" >/dev/null \
     || die "velocidrone_ws-*.whl missing from $WHEEL_DIR (splitter depends on it and it is not on PyPI)"
+compgen -G "$WHEEL_DIR/velocidrone_api-*.whl" >/dev/null \
+    || die "velocidrone_api-*.whl missing from $WHEEL_DIR (splitter depends on it and it is not on PyPI)"
 
 ENV_TEMPLATE=""
 for candidate in "$SCRIPT_DIR/splitter.env.example" "$SCRIPT_DIR/../../.env.example"; do

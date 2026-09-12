@@ -8,6 +8,7 @@
   <span class="actions">
     <button type="button" class="btn sm" id="btn-session">Track…</button>
     <button type="button" class="btn sm" id="btn-reconnect" title="reconnect to the game">↻</button>
+    <button type="button" class="btn sm" id="btn-fullscreen" title="fullscreen">⛶</button>
   </span>
 </div>
 
@@ -51,15 +52,26 @@
 
 <dialog id="session-dialog">
   <h2>Track &amp; quad</h2>
-  <p class="help">Single player never tells Splitter the track. Set it here once; it sticks until the game sends a session (hosting a room) or you change it.</p>
+  <p class="help">Single player never tells Splitter the track. Pick it here once; it sticks until the game sends a session (hosting a room) or you change it. PBs are kept per online track id, quad and lap count.</p>
   <form id="session-form" class="form" style="margin-top:1rem">
-    <div class="field"><label for="f-track">Track</label><input id="f-track" name="track_name" required list="track-list"><datalist id="track-list"></datalist></div>
-    <div class="row">
-      <div class="field"><label for="f-scenery">Scenery</label><input id="f-scenery" name="scenery"></div>
-      <div class="field"><label for="f-laps">Laps</label><input id="f-laps" name="race_laps" type="number" min="0" max="99"></div>
+    <div class="field" id="track-picker">
+      <label for="f-search">Track</label>
+      <div class="searchbar">
+        <input id="f-search" class="tp-search" type="search" placeholder="search official & community tracks…" autocomplete="off" autocapitalize="off">
+        <select class="tp-source" title="which list to search"><option value="">All</option><option value="community">Community</option><option value="official">Official</option></select>
+      </div>
+      <div class="picker-results tp-results"></div>
+      <div class="picked tp-picked"></div>
+      <input type="hidden" name="track_name"><input type="hidden" name="scenery">
+      <input type="hidden" name="track_id" value="0"><input type="hidden" name="scene_id" value="0"><input type="hidden" name="track_source" value="">
+    </div>
+    <div class="row" id="quad-picker">
+      <div class="field"><label for="f-class">Class</label><select id="f-class" class="qp-class"></select></div>
+      <div class="field"><label for="f-quad">Quad</label><select id="f-quad" class="qp-model"></select></div>
+      <input type="hidden" name="quad_type" data-auto="1"><input type="hidden" name="quad_model_id" value="0"><input type="hidden" name="quad_class_id" value="0">
     </div>
     <div class="row">
-      <div class="field"><label for="f-quad">Quad</label><input id="f-quad" name="quad_type" list="quad-list"><datalist id="quad-list"></datalist></div>
+      <div class="field"><label for="f-laps">Laps</label><input id="f-laps" name="race_laps" type="number" min="0" max="99"></div>
       <div class="field"><label for="f-size">Size</label><input id="f-size" name="quad_size" placeholder="5"></div>
     </div>
     <div class="form-actions">
@@ -73,5 +85,6 @@
 {% endblock %}
 {% block scripts %}
 <script>window.SPLITTER_SNAPSHOT = {{ snapshot | tojson }};</script>
+<script src="/static/picker.js"></script>
 <script src="/static/live.js"></script>
 {% endblock %}

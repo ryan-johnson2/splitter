@@ -2,7 +2,7 @@
 {% block title %}{{ brand_name }} · {{ track }}{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-<div class="page-head"><h1>{{ track or "Unknown track" }}</h1><p class="sub">{{ quad or "any quad" }} · {{ laps or "?" }} laps · {{ finished_count }} finished of {{ races | length }} runs</p></div>
+<div class="page-head"><h1>{{ track or "Unknown track" }}</h1><p class="sub">{{ quad or "any quad" }} · {{ laps or "?" }} laps · {{ finished_count }} finished of {{ races | length }} runs{% if track_id %} · <span class="muted">track #{{ track_id }}</span>{% else %} · <span class="pill bad small">no online id — no PBs</span>{% endif %}</p></div>
 
 <div class="grid">
   <div class="card kv">Personal best<b class="big">{% if best %}<a href="/races/{{ best.id }}">{{ format_ms(best.total_time_ms) }}</a>{% else %}--{% endif %}</b>{% if best %}<time datetime="{{ utc_iso(best.started_at) }}">{{ best.started_at }}</time>{% endif %}</div>

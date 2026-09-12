@@ -13,10 +13,12 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from splitter.config import Config
+from splitter.core import quads
 from splitter.db import repos
 from splitter.db.engine import create_engine, create_session_factory, init_db
 from splitter.db.runtime_settings import RuntimeSettings
 from splitter.game.bridge import GameBridge
+from splitter.game.catalog import TrackCatalog
 from splitter.game.controller import RaceController
 from splitter.live.hub import LiveHub
 from splitter.version import __version__
@@ -64,10 +66,26 @@ def create_app(config: Config | None = None) -> FastAPI:
 
         hub = LiveHub()
         bridge: GameBridge
+        # Online track lists for the picker; tests replace it with a fake.
+        if not hasattr(app.state, "catalog"):
+            app.state.catalog = TrackCatalog()
+        catalog = app.state.catalog
+        game_cat = quads.catalog()
+        log.info(
+            "quad/scene catalog: %d models, %d scenes (%s)",
+            len(game_cat.models),
+            len(game_cat.scenes),
+            game_cat.generated_at or "no bundled file",
+        )
         controller = RaceController(
-            settings, session_factory, hub, status_provider=lambda: bridge.status()
+            settings,
+            session_factory,
+            hub,
+            status_provider=lambda: bridge.status(),
+            resolve_track=catalog.resolve,
         )
         controller.load_sticky_session()
+        await controller.refresh_reference()
 
         async def on_state(_b: GameBridge) -> None:
             controller.broadcast_status()

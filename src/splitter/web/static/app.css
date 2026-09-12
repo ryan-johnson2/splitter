@@ -135,7 +135,12 @@ details[open] summary { margin-bottom:.6rem; }
 .big-time { font-size:clamp(3rem, 12vw, 7rem); font-weight:700; line-height:1; font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
 .big-time.lap { font-size:clamp(2rem, 7vw, 4rem); color:var(--fg2); }
 .big-delta { font-size:clamp(2.2rem, 8vw, 4.5rem); font-weight:700; line-height:1.1; font-variant-numeric:tabular-nums; }
-.stat-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:.8rem 1.2rem; margin-top:1rem; }
+.stat-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(100px, 1fr)); gap:.8rem 1rem; margin-top:1rem; }
+#ref-line { margin-top:.8rem; }
+/* Fullscreen on a tablet: drop the chrome, keep the timer big. */
+:fullscreen body, body:fullscreen { padding-top:0; }
+:fullscreen header#top { display:none; }
+:fullscreen main { padding-top:.6rem; }
 .stat { color:var(--dim); font-size:.78rem; text-transform:uppercase; letter-spacing:.04em; }
 .stat b { display:block; color:var(--fg); font-size:1.5rem; font-variant-numeric:tabular-nums; text-transform:none; letter-spacing:0; }
 .state-banner { display:flex; align-items:center; gap:.8rem; padding:.7rem 1rem; border-radius:8px; background:var(--card2); border:1px solid var(--line); margin-bottom:1rem; flex-wrap:wrap; }
@@ -190,3 +195,17 @@ dialog::backdrop { background:rgba(0,0,0,.6); }
   table.stack td:empty { display:none; }
 }
 @media (max-width:420px) { .grid { grid-template-columns:1fr; } }
+
+/* ── track picker (live page "Track…" dialog) ─────────────────────── */
+.searchbar { display:flex; gap:.5rem; align-items:center; }
+.searchbar input { flex:1; min-width:0; }
+.searchbar select { width:auto; }
+.picker-results { display:flex; flex-direction:column; gap:.25rem; max-height:40vh; overflow-y:auto; margin-top:.5rem; }
+.picker-results:empty { display:none; }
+.picker-head { padding:.25rem .4rem; }
+.picker-row { display:flex; flex-direction:column; align-items:flex-start; gap:.15rem; text-align:left; width:100%;
+  padding:.5rem .7rem; border:1px solid var(--line, #333); border-radius:8px; background:transparent; color:inherit; cursor:pointer; font:inherit; }
+.picker-row:hover, .picker-row:focus-visible { border-color:var(--accent, #4ea1ff); background:color-mix(in srgb, var(--accent, #4ea1ff) 10%, transparent); outline:none; }
+.picker-row .name { font-weight:600; }
+.picker-row .meta { font-size:.85rem; opacity:.8; }
+.picked { margin:-.4rem 0 1rem; font-size:.9rem; }

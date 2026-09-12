@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Build the LXC deployment bundle: wheels for splitter and its sibling
-# velocidrone-ws (which is not on PyPI), plus the installer, unit file and
+# Build the LXC deployment bundle: wheels for splitter and its siblings
+# velocidrone-ws and velocidrone-api (not on PyPI), plus the installer, unit file and
 # env template, tarred into one artifact to copy into the container.
 #
 # Usage (from anywhere):
@@ -14,6 +14,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 WS_SRC="$(cd -- "$REPO_ROOT/../velocidrone-libraries/velocidrone-websocket" && pwd)"
+API_SRC="$(cd -- "$REPO_ROOT/../velocidrone-libraries/velocidrone-api" && pwd)"
 DIST="$SCRIPT_DIR/dist"
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -21,6 +22,7 @@ say() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 
 [[ -f "$REPO_ROOT/pyproject.toml" ]] || die "cannot locate the splitter repo root"
 [[ -f "$WS_SRC/pyproject.toml" ]] || die "velocidrone-websocket not found at $WS_SRC"
+[[ -f "$API_SRC/pyproject.toml" ]] || die "velocidrone-api not found at $API_SRC"
 
 rm -rf "$DIST"
 mkdir -p "$DIST"
@@ -55,6 +57,8 @@ fi
 
 say "building velocidrone-ws wheel"
 build_wheel "$WS_SRC"
+say "building velocidrone-api wheel"
+build_wheel "$API_SRC"
 say "building splitter wheel"
 build_wheel "$REPO_ROOT"
 

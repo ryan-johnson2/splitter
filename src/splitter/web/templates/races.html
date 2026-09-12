@@ -19,7 +19,7 @@
     <tr class="{% if r.is_best %}best{% endif %}">
       <td><input type="checkbox" name="race_ids" value="{{ r.id }}"></td>
       <td data-label="When"><a href="/races/{{ r.id }}"><time datetime="{{ utc_iso(r.started_at) }}">{{ r.started_at }}</time></a></td>
-      <td data-label="Track">{{ r.track_name or "—" }}{% if r.scenery %} <span class="muted small">{{ r.scenery }}</span>{% endif %}</td>
+      <td data-label="Track">{{ r.track_name or "—" }}{% if r.scenery %} <span class="muted small">{{ r.scenery }}</span>{% endif %}{% if not r.track_id %} <span class="pill bad small" title="no online track id — cannot be a PB">no id</span>{% endif %}</td>
       <td data-label="Quad">{{ r.quad_type or "—" }}</td>
       <td data-label="Laps" class="num">{{ r.total_laps }}{% if r.race_laps %}/{{ r.race_laps }}{% endif %}</td>
       <td data-label="Time" class="num">{% if r.status == "finished" %}{{ format_ms(r.total_time_ms) }}{% else %}<span class="pill bad">aborted</span>{% endif %}</td>
@@ -34,15 +34,36 @@
 {% if races %}
 <details>
   <summary>Bulk edit selected</summary>
-  <p class="help">Fix the track/quad on runs recorded with the wrong session, or delete them. Blank fields are left alone.</p>
-  <div class="inline-form" style="margin-top:.6rem">
-    <input name="track_name" placeholder="track name" list="track-list"><datalist id="track-list">{% for t in tracks %}<option value="{{ t }}">{% endfor %}</datalist>
-    <input name="scenery" placeholder="scenery">
-    <input name="quad_type" placeholder="quad" list="quad-list"><datalist id="quad-list">{% for q in quads %}<option value="{{ q }}">{% endfor %}</datalist>
-    <button type="submit" name="action" value="update" class="primary">Apply</button>
-    <button type="submit" name="action" value="delete" class="danger" onclick="return confirm('Delete the selected races?')">Delete</button>
+  <p class="help">Re-attribute runs recorded with the wrong track or quad, or delete them. Nothing picked = left alone.</p>
+  <div class="field" id="bulk-track-picker" style="margin-top:.6rem">
+    <div class="searchbar">
+      <input class="tp-search" type="search" placeholder="search for the right track…" autocomplete="off" autocapitalize="off">
+      <select class="tp-source"><option value="">All</option><option value="community">Community</option><option value="official">Official</option></select>
+    </div>
+    <div class="picker-results tp-results"></div>
+    <div class="picked tp-picked"></div>
+    <input type="hidden" name="track_name"><input type="hidden" name="scenery">
+    <input type="hidden" name="track_id" value="0"><input type="hidden" name="scene_id" value="0"><input type="hidden" name="track_source" value="">
+  </div>
+  <div class="row" id="bulk-quad-picker">
+    <div class="field"><label>Class</label><select class="qp-class"></select></div>
+    <div class="field"><label>Quad</label><select class="qp-model"></select></div>
+    <input type="hidden" name="quad_type" data-auto="1"><input type="hidden" name="quad_model_id" value="0"><input type="hidden" name="quad_class_id" value="0">
+  </div>
+  <div class="inline-form">
+    <button type="submit" name="action" value="update" class="primary">Apply to selected</button>
+    <button type="submit" name="action" value="delete" class="danger" onclick="return confirm('Delete the selected races?')">Delete selected</button>
   </div>
 </details>
 {% endif %}
 </form>
+{% endblock %}
+{% block scripts %}
+{% if races %}
+<script src="/static/picker.js"></script>
+<script>
+  Splitter.trackPicker(document.getElementById("bulk-track-picker"), { emptyText: "No track change." });
+  Splitter.quadPicker(document.getElementById("bulk-quad-picker")).set(0, 0);
+</script>
+{% endif %}
 {% endblock %}

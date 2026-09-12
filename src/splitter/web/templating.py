@@ -10,17 +10,21 @@ from urllib.parse import urlencode
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from splitter.core.timeparse import format_delta, format_ms, format_speed
+from splitter.core.timeparse import DEFAULT_TIME_FORMAT, format_delta, format_ms, format_speed
 from splitter.version import __version__
 
 
 def _site_context(request: Any) -> dict[str, Any]:
     settings = getattr(request.app.state, "settings", None)
     bridge = getattr(request.app.state, "bridge", None)
+    style = (settings.get("time_format") if settings else "") or DEFAULT_TIME_FORMAT
     return {
         "brand_name": (settings.get("brand_name").strip() if settings else "") or "Splitter",
         "app_version": __version__,
         "game_connected": bool(bridge and bridge.connected),
+        "time_format": style,
+        # Per-request override of the global so every page honours the setting.
+        "format_ms": lambda ms: format_ms(ms, style),
     }
 
 

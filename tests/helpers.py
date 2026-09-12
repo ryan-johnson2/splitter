@@ -109,15 +109,20 @@ def subscribe(hub: LiveHub) -> asyncio.Queue[str]:
 # A 2-lap, 3-gate race with a distinct start/finish gate, in wire form:
 # lap 1: gates 1..3, S/F crossing reported as (2,1); lap 2: gates 2..3 then finish (2,4).
 def two_lap_race(base: float = 0.0, scale: float = 1.0) -> list[tuple[int, int, float, bool]]:
-    t = [2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0]
+    """Two laps on a track with a start-only gate and 3 checkpoints per lap.
+
+    Real wire shape: the start gate is ``lap 0``, the lap counter increments at
+    the start/finish gate (ordinal 2), the finish arrives one ordinal past the
+    per-lap count with ``finished`` set. Holeshot 2 s, laps 6 s each, total 14 s.
+    """
+    t = [1.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0]
     t = [base + x * scale for x in t]
     return [
-        (1, 1, 0.0, False),  # start line at t=0 — ignored
-        (1, 2, t[0], False),
-        (1, 3, t[1], False),
-        (1, 4, t[2], False),
-        (2, 1, t[3], False),  # closes lap 1
-        (2, 2, t[4], False),
+        (0, 1, t[0], False),  # start-only gate (holeshot)
+        (1, 2, t[1], False),  # first start/finish crossing: lap 1 starts, holeshot ends
+        (1, 3, t[2], False),
+        (1, 4, t[3], False),
+        (2, 2, t[4], False),  # start/finish: closes lap 1, starts lap 2
         (2, 3, t[5], False),
         (2, 4, t[6], False),
         (2, 5, t[7], True),  # finish

@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
+from splitter.core import quads
 from splitter.core.splits import theoretical_best
 from splitter.db import repos
 from splitter.web.templating import templates
@@ -22,9 +23,17 @@ async def tracks_page(request: Request) -> Any:
 
 
 @router.get("/detail", response_class=HTMLResponse)
-async def track_page(request: Request, track: str, quad: str = "", laps: int = 0) -> Any:
+async def track_page(
+    request: Request, track_id: int = 0, quad_model: int = 0, laps: int = 0, track: str = ""
+) -> Any:
+    """One PB group. ``track`` (a name) only matters for id-less legacy runs."""
+    key = repos.PBKey(track_id, quad_model, laps)
     async with request.app.state.session_factory() as db:
-        races = await repos.races_for_track(db, track, quad, laps)
+        races = await repos.races_for_key(db, key)
+    if not key.valid:
+        races = [r for r in races if r.track_name == track]
+    track = races[-1].track_name if races else track
+    quad = quads.model_name(quad_model) or (races[-1].quad_type if races else "")
     finished = [r for r in races if r.status == "finished" and r.total_time_ms is not None]
     best = min(finished, key=lambda r: r.total_time_ms or 0) if finished else None
 
@@ -69,8 +78,10 @@ async def track_page(request: Request, track: str, quad: str = "", laps: int = 0
         "track_detail.html",
         {
             "track": track,
+            "track_id": track_id,
             "quad": quad,
             "laps": laps,
+            "identified": key.valid,
             "races": list(reversed(races)),
             "finished_count": len(finished),
             "best": best,
