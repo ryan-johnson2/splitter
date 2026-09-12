@@ -10,12 +10,7 @@
   </form>
 </div>
 
-<form method="post" action="/races/bulk" id="bulk-form">
-<div class="card">
-  {% if not races %}<p class="empty">No races yet. Fly one.</p>{% else %}
-  <table class="stack">
-    <tr><th></th><th>When</th><th>Track</th><th>Quad</th><th class="num">Laps</th><th class="num">Time</th><th class="num">vs PB</th><th class="num">Top km/h</th><th></th></tr>
-    {% for r in races %}
+{% macro race_row(r) %}
     <tr class="{% if r.is_best %}best{% endif %}">
       <td><input type="checkbox" name="race_ids" value="{{ r.id }}"></td>
       <td data-label="When"><a href="/races/{{ r.id }}"><time datetime="{{ utc_iso(r.started_at) }}">{{ r.started_at }}</time></a></td>
@@ -27,10 +22,29 @@
       <td data-label="Top km/h" class="num">{{ format_speed(r.max_speed) }}</td>
       <td>{% if r.is_best %}<span class="pill accent">PB</span>{% endif %}{% if r.session_source == "manual" %}<span class="pill dim" title="track entered by hand">manual</span>{% elif r.session_source == "sticky" %}<span class="pill dim" title="track carried over from the previous run">carried</span>{% endif %}</td>
     </tr>
-    {% endfor %}
+{% endmacro %}
+{% macro race_table(rows) %}
+  <table class="stack">
+    <tr><th></th><th>When</th><th>Track</th><th>Quad</th><th class="num">Laps</th><th class="num">Time</th><th class="num">vs PB</th><th class="num">Top km/h</th><th></th></tr>
+    {% for r in rows %}{{ race_row(r) }}{% endfor %}
   </table>
-  {% endif %}
+{% endmacro %}
+{# Aborted runs are kept but collapsed out of the way, unless the filter asks for them. #}
+{% set aborted = races | selectattr("status", "equalto", "aborted") | list if filter.status != "aborted" else [] %}
+{% set main_rows = races | rejectattr("status", "equalto", "aborted") | list if filter.status != "aborted" else races %}
+
+<form method="post" action="/races/bulk" id="bulk-form">
+<div class="card">
+  {% if not races %}<p class="empty">No races yet. Fly one.</p>
+  {% elif not main_rows %}<p class="empty">No finished runs match; {{ aborted | length }} aborted below.</p>
+  {% else %}{{ race_table(main_rows) }}{% endif %}
 </div>
+{% if aborted %}
+<details class="aborted-runs">
+  <summary>{{ aborted | length }} aborted run{{ "s" if aborted | length != 1 }} <span class="muted small">— kept, collapsed; open to review or bulk-delete</span></summary>
+  {{ race_table(aborted) }}
+</details>
+{% endif %}
 {% if races %}
 <details>
   <summary>Bulk edit selected</summary>

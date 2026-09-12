@@ -207,3 +207,5 @@ dialog::backdrop { background:rgba(0,0,0,.6); }
 .picker-row .name { font-weight:600; }
 .picker-row .meta { font-size:.85rem; opacity:.8; }
 .picked { margin:-.4rem 0 1rem; font-size:.9rem; }
+details.aborted-runs { margin-top:-.4rem; margin-bottom:1.2rem; }
+details.aborted-runs table { margin-top:.2rem; }
