@@ -209,6 +209,10 @@ dialog::backdrop { background:rgba(0,0,0,.6); }
 .picked { margin:-.4rem 0 1rem; font-size:.9rem; }
 details.aborted-runs { margin-top:-.4rem; margin-bottom:1.2rem; }
 details.aborted-runs table { margin-top:.2rem; }
+/* Installed as an app (standalone/fullscreen display mode): the browser's own
+   chrome is gone, so the plain-fullscreen button is redundant; focus stays. */
+html.standalone #btn-fullscreen { display:none; }
+html.standalone body { padding-top: env(safe-area-inset-top); }
 details.picker-manual { border:0; padding:0; margin:0 0 .8rem; }
 details.picker-manual summary { font-weight:400; }
 details.picker-manual .inline-form { margin-top:.4rem; }

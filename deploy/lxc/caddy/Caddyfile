@@ -1,0 +1,23 @@
+# Splitter behind Caddy on the LXC (deploy/lxc/caddy/install-caddy.sh).
+#
+# https with a certificate from Caddy's own internal CA — the box has no
+# public DNS name, so Let's Encrypt is not an option. Install the CA root
+# (/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt) on the
+# tablet once and the site is trusted, which is what lets Android Chrome
+# install Splitter as a PWA. Plain http is kept as well (no forced redirect)
+# so a device without the root cert still works.
+{
+	# No public reachability: don't try ACME at all.
+	auto_https disable_redirects
+}
+
+splitter.home.ntninja.com, splitter {
+	tls internal
+	reverse_proxy 127.0.0.1:8100
+	encode gzip
+}
+
+http://splitter.home.ntninja.com, http://splitter, http://192.168.38.101 {
+	reverse_proxy 127.0.0.1:8100
+	encode gzip
+}

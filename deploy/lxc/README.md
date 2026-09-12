@@ -91,3 +91,23 @@ pct exec 111 -- systemctl start splitter
 The database is the only state (races, gate times, telemetry, the raw frame
 log). `runuser -u splitter -- /opt/splitter/venv/bin/splitter races` lists
 recent runs from inside the container.
+
+## 6. HTTPS and installing it as an app (PWA)
+
+The box has no public DNS name, so there is no Let's Encrypt. `caddy/` puts
+Caddy in front of Splitter with a certificate from Caddy's **internal CA**,
+keeping plain http as well:
+
+```sh
+pct push 112 deploy/lxc/caddy/Caddyfile /root/Caddyfile   # or scp the caddy/ dir
+./install-caddy.sh                                          # inside the container
+```
+
+It exports the CA root to `/root/splitter-ca.crt`. Install that once on the
+tablet (Android: Settings → Security → Encryption & credentials → Install a
+certificate → CA certificate; iPadOS: open the file, then Settings → General →
+VPN & Device Management → install, and Settings → General → About →
+Certificate Trust Settings → enable). After that `https://splitter.home.ntninja.com/`
+is trusted, Chrome offers **Install app**, and the service worker keeps the
+pages available if the server blips. iPadOS also does "Add to Home Screen" over
+plain http, without the certificate.

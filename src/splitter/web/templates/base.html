@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-title" content="{{ brand_name }}">
   <link rel="manifest" href="/static/manifest.webmanifest">
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="/static/icon.svg">
+  <link rel="apple-touch-icon" href="/static/icon-256.png">
   <title>{% block title %}{{ brand_name }}{% endblock %}</title>
   <link rel="stylesheet" href="/static/app.css">
   <script>window.SPLITTER_TIME_FORMAT = {{ time_format | tojson }};</script>
@@ -38,10 +38,24 @@
 </main>
 <footer>
   <span>{{ brand_name }} v{{ app_version }}</span>
+  <button type="button" class="btn sm" id="btn-install" hidden title="install as an app">Install app</button>
   <span>·</span>
   <a href="/healthz">health</a> · <a href="/protocol">protocol</a>
 </footer>
 <script>
+  // PWA: service worker (needs https or localhost; silently skipped otherwise),
+  // the install prompt (Android/desktop Chrome), and standalone-mode detection.
+  (function () {
+    if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
+      navigator.serviceWorker.register("/static/sw.js?v=" + encodeURIComponent({{ app_version | tojson }})).catch(function () {});
+    }
+    var standalone = window.matchMedia("(display-mode: standalone)").matches || window.matchMedia("(display-mode: fullscreen)").matches || window.navigator.standalone === true;
+    if (standalone) document.documentElement.classList.add("standalone");
+    var btn = document.getElementById("btn-install"), deferred = null;
+    window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); deferred = e; if (btn && !standalone) btn.hidden = false; });
+    if (btn) btn.onclick = function () { if (!deferred) return; deferred.prompt(); deferred.userChoice.then(function () { deferred = null; btn.hidden = true; }); };
+    window.addEventListener("appinstalled", function () { if (btn) btn.hidden = true; });
+  })();
   function localizeTimes(root) {
     var fmt = new Intl.DateTimeFormat(undefined, {dateStyle: "medium", timeStyle: "short"});
     (root || document).querySelectorAll("time[datetime]").forEach(function (el) {
