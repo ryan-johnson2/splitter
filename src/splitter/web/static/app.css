@@ -94,6 +94,9 @@ textarea { min-height:4.5rem; resize:vertical; }
 form.inline { display:inline; }
 .inline-form { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
 .inline-form input, .inline-form select { flex:1 1 10rem; }
+/* Author rules beat the UA stylesheet's [hidden] rule, so any element we give a
+   display (every button) needs this or `el.hidden = true` does nothing. */
+[hidden] { display:none !important; }
 .btn, button { cursor:pointer; background:var(--card2); border:1px solid var(--line); color:var(--fg); border-radius:7px; padding:.45rem .9rem; font:inherit; line-height:1.2; display:inline-block; }
 .btn:hover, button:hover { border-color:var(--dim); text-decoration:none; }
 .btn.primary, button.primary { background:var(--accent); color:var(--accent-fg); border-color:var(--accent); font-weight:600; }
