@@ -16,6 +16,30 @@
   <div class="card kv">Top speed<b>{{ format_speed(race.max_speed) }} <span class="muted small">km/h</span></b>{% if race.avg_speed %}avg {{ format_speed(race.avg_speed) }} · {{ "%.0f" | format(race.distance_m or 0) }} m{% endif %}</div>
 </div>
 
+{% if section_rows %}
+<div class="card">
+  <div class="card-head"><h2>Sections</h2><span class="muted small">this run per lap, against the same lap of the PB{% if race.crash_count %} · <span class="pill bad">{{ race.crash_count }} crash{{ "es" if race.crash_count != 1 }}</span>{% endif %}</span>
+    <span class="actions"><a class="btn sm" href="/tracks/detail?track_id={{ race.track_id }}&quad_model={{ race.quad_model_id }}&laps={{ race.race_laps }}#sections-card">Track trends</a></span></div>
+  <div class="table-wrap">
+  <table class="mono small sections-table">
+    <tr><th>Section</th><th>Gates</th>{% for lap in lap_numbers %}<th class="num">Lap {{ lap }}</th>{% endfor %}<th class="num">Total</th><th class="num">vs PB</th><th class="num" title="slowest point across laps">Min km/h</th></tr>
+    {% for row in section_rows %}{% set s = row.section %}
+    <tr>
+      <td class="name"><span class="sec-swatch sec-{{ (s.ordinal - 1) % 8 }}"></span>{{ s.name }}</td>
+      <td class="muted">{{ labels.get(s.first, "#" ~ s.first) }}{% if s.last != s.first %}–{{ labels.get(s.last, "#" ~ s.last) }}{% endif %}</td>
+      {% for l in row.laps %}<td class="num">{{ format_ms(l.ms) }}{% if l.delta is not none %} <span class="small {{ delta_class(l.delta) }}">{{ format_delta(l.delta) }}</span>{% endif %}{% if l.crashes %} <span class="crash-mark" title="crash in this section on this lap">✕{% if l.crashes > 1 %}{{ l.crashes }}{% endif %}</span>{% endif %}</td>{% endfor %}
+      <td class="num">{{ format_ms(row.total_ms) }}</td>
+      <td class="num {{ delta_class(row.delta_ms) }}"><b>{{ format_delta(row.delta_ms) if row.delta_ms is not none else "--" }}</b></td>
+      {% set speeds = row.laps | map(attribute="min_speed") | reject("none") | list %}
+      <td class="num">{{ format_speed(speeds | min) if speeds else "--" }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+  {% if crashes %}<p class="help">Crashes: {% for c in crashes %}{% if not loop.first %} · {% endif %}{{ "%.1f" | format(c.t_ms / 1000) }} s{% if c.lap %} lap {{ c.lap }}, {{ labels.get(c.segment, "#" ~ c.segment) }}{% else %} before the first gate{% endif %} ({{ format_speed(c.speed_before) }} km/h → {{ "%.0f" | format(-c.decel) }} m/s²){% endfor %}</p>{% endif %}
+</div>
+{% endif %}
+
 {% if telemetry %}
 <div class="card">
   <div class="card-head"><h2>Flight path</h2><span class="muted small">top-down, {{ race.telemetry_samples }} samples · colour = speed</span></div>
@@ -27,8 +51,7 @@
 </div>
 {% endif %}
 
-<div class="live-grid">
-  <div class="card">
+<div class="card">
     <h2>Laps</h2>
     {% if not lap_rows %}<p class="empty">No completed laps.</p>{% else %}
     <table class="mono">
@@ -40,8 +63,9 @@
     {% endif %}
     {% if best and best.id != race.id %}<p class="help">Current PB is <a href="/races/{{ best.id }}">#{{ best.id }}</a> at {{ format_ms(best.total_time_ms) }}.</p>{% endif %}
   </div>
-  <div class="card">
-    <h2>Gates</h2>
+
+<details class="card gate-details">
+  <summary>Gate crossings <span class="muted small">— all {{ gate_rows | length }}, segment by segment</span></summary>
     {% if not gate_rows %}<p class="empty">No gate crossings recorded.</p>{% else %}
     <div class="gate-log"><table class="mono">
       <tr><th>#</th><th>Lap</th><th>Gate</th><th class="num">Segment</th><th class="num">seg vs PB</th><th class="num">Race</th><th class="num">vs PB</th><th class="num">km/h</th></tr>
@@ -50,8 +74,7 @@
       {% endfor %}
     </table></div>
     {% endif %}
-  </div>
-</div>
+  </details>
 
 <details>
   <summary>Edit</summary>
@@ -98,7 +121,7 @@
 {% if telemetry %}
 <script>
 (function () {
-  var T = {{ telemetry | tojson }}, G = {{ gate_marks | tojson }};
+  var T = {{ telemetry | tojson }}, G = {{ gate_marks | tojson }}, X = {{ crash_marks | tojson }};
   var NS = "http://www.w3.org/2000/svg";
   function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
   function speedColor(v, max) { var t = max ? Math.min(1, v / max) : 0; var h = 160 - 160 * t; return "hsl(" + h + " 80% 55%)"; }
@@ -123,6 +146,12 @@
     el("circle", { cx: px(best), cy: py(best), r: 4, class: "gate" }, svg);
     var t = el("text", { x: px(best) + 6, y: py(best) - 6, class: "label" }, svg); t.textContent = "L" + g[1] + "G" + g[2];
   });
+  X.forEach(function (c) {
+    var p = [c[0], c[1], c[2], c[3]], cx = px(p), cy = py(p), r = 6;
+    el("line", { x1: cx - r, y1: cy - r, x2: cx + r, y2: cy + r, class: "crash" }, svg);
+    var m = el("line", { x1: cx - r, y1: cy + r, x2: cx + r, y2: cy - r, class: "crash" }, svg);
+    var t = el("title", {}, m); t.textContent = "crash at " + (c[0] / 1000).toFixed(1) + " s";
+  });
   var lg = el("text", { x: W - pad, y: H - 6, class: "label", "text-anchor": "end" }, svg); lg.textContent = "max " + Math.round(maxSpeed * 3.6) + " km/h";
 
   // Speed over time.
@@ -131,6 +160,7 @@
   function sx(t) { return L + (t / tMax) * (SW - L - R); } function sy(v) { return Tp + (1 - v / vMax) * (SH - Tp - B); }
   for (var v = 0; v <= vMax; v += vMax / 4) { el("line", { x1: L, x2: SW - R, y1: sy(v), y2: sy(v), class: "grid" }, sc); var lb = el("text", { x: L - 6, y: sy(v) + 4, class: "label", "text-anchor": "end" }, sc); lb.textContent = Math.round(v); }
   G.forEach(function (g) { el("line", { x1: sx(g[0]), x2: sx(g[0]), y1: Tp, y2: SH - B, stroke: "#f7b545", "stroke-opacity": .5 }, sc); });
+  X.forEach(function (c) { el("line", { x1: sx(c[0]), x2: sx(c[0]), y1: Tp, y2: SH - B, class: "crash" }, sc); });
   var d = T.map(function (s, i) { return (i ? "L" : "M") + sx(s[0]).toFixed(1) + " " + sy(s[4] * 3.6).toFixed(1); }).join(" ");
   el("path", { d: d, class: "series" }, sc);
   for (var t = 0; t <= tMax; t += Math.max(5000, Math.round(tMax / 8 / 5000) * 5000)) { var tl = el("text", { x: sx(t), y: SH - 6, class: "label", "text-anchor": "middle" }, sc); tl.textContent = (t / 1000).toFixed(0) + "s"; }

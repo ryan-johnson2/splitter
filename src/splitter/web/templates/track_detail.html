@@ -10,24 +10,53 @@
   <div class="card kv">Theoretical best<b>{{ format_ms(theoretical) }}</b>{% if theoretical and best %}<span class="{{ delta_class(theoretical - best.total_time_ms) }}">{{ format_delta(theoretical - best.total_time_ms) }} vs PB</span> · fastest segment at every gate across {{ comparable }} runs{% endif %}</div>
 </div>
 
+{% if analysis %}
+<div class="card" id="sections-card">
+  <div class="card-head"><h2>Sections</h2>
+    <span class="muted small">{{ analysis.count }} gates per lap in {{ analysis.sections | length }} sections · per-lap times over {{ analysis.stats[0].instances if analysis.stats else 0 }} laps · crashes from {{ analysis.crash_runs }} runs{% if analysis.seeded %} · <span class="pill dim">auto-suggested</span>{% endif %}</span>
+    <span class="actions"><button type="button" class="btn sm" id="btn-edit-sections">Edit sections</button></span>
+  </div>
+  <div class="sections-layout">
+    {% if analysis.gate_points %}<svg id="track-map" class="chart map" viewBox="0 0 360 300"></svg>{% endif %}
+    <div class="table-wrap">
+    <table class="mono small sections-table">
+      <tr><th>Section</th><th>Gates</th><th class="num" title="PB run minus the best you have ever flown it, per lap">On the table</th><th class="num">Best</th><th class="num">PB run</th><th class="num">Median</th><th class="num" title="interquartile range across laps">Spread</th><th class="num" title="slowest point in the section on the PB run">Min km/h</th><th class="num">Crashes</th><th>Verdict</th><th class="num" title="last 3 runs vs the 3 before">Trend</th></tr>
+      {% for st in section_stats %}{% set s = st.section %}
+      <tr>
+        <td class="name"><span class="sec-swatch sec-{{ (s.ordinal - 1) % 8 }}"></span>{{ s.name }}</td>
+        <td class="muted">{{ analysis.labels.get(s.first, "#" ~ s.first) }}{% if s.last != s.first %}–{{ analysis.labels.get(s.last, "#" ~ s.last) }}{% endif %}</td>
+        <td class="num"><b>{{ format_delta(st.on_table_ms) if st.on_table_ms is not none else "--" }}</b></td>
+        <td class="num">{{ format_ms(st.best_ms) }}</td>
+        <td class="num">{{ format_ms(st.pb_ms) }}</td>
+        <td class="num">{{ format_ms(st.median_ms) }}</td>
+        <td class="num">{{ format_ms(st.iqr_ms) }}</td>
+        <td class="num">{{ format_speed(st.pb_min_speed) }}</td>
+        <td class="num">{% if st.crashes %}<span class="crash-mark">✕</span> {{ st.crashes }}{% else %}0{% endif %}</td>
+        <td>{% if st.verdict != "-" %}<span class="pill verdict {{ st.verdict }}">{{ st.verdict }}</span>{% endif %}</td>
+        <td class="num {{ delta_class(st.trend_ms) }}">{{ format_delta(st.trend_ms) if st.trend_ms is not none else "" }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    </div>
+  </div>
+  <p class="help"><b>On the table</b> is the PB run's time in the section minus your best-ever lap through it. <b>line</b>: the PB is consistently slower there than your best, so the line has time in it. <b>mistakes</b>: a real share of laps blow up there. <b>solid</b>: little to gain.{% if analysis.holeshot_crashes %} Plus {{ analysis.holeshot_crashes }} crash{{ "es" if analysis.holeshot_crashes != 1 }} before the first gate.{% endif %}</p>
+  <div id="section-editor" hidden>
+    <p class="help">Tap a gate to start a new section there; tap a section's first gate to merge it into the one before. Name them, then save.</p>
+    <div class="gate-strip" id="gate-strip"></div>
+    <div class="section-names" id="section-names"></div>
+    <div class="form-actions">
+      <button type="button" class="btn primary sm" id="btn-save-sections">Save</button>
+      <button type="button" class="btn sm" id="btn-cancel-sections">Cancel</button>
+      <button type="button" class="btn sm danger" id="btn-reset-sections" title="discard this layout and suggest one from the data again">Re-suggest</button>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {% if progression | length > 1 %}
 <div class="card">
   <div class="card-head"><h2>Progression</h2><span class="muted small">total time per finished run · gold = PB</span></div>
   <svg id="prog-chart" class="chart" viewBox="0 0 800 240"></svg>
-</div>
-{% endif %}
-
-{% if gates %}
-<div class="card">
-  <div class="card-head"><h2>Gate consistency</h2><span class="muted small">segment time per crossing across {{ comparable }} comparable runs</span></div>
-  <svg id="gate-chart" class="chart" viewBox="0 0 800 260"></svg>
-  <table class="mono small" style="margin-top:.8rem">
-    <tr><th>Gate</th><th class="num">Best</th><th class="num">PB run</th><th class="num">Median</th><th class="num">Worst</th><th class="num">Spread</th></tr>
-    {% for g in gates %}
-    <tr><td>{{ g.label }}</td><td class="num">{{ format_ms(g.best) }}</td><td class="num {{ delta_class(g.pb - g.best) if g.pb is not none }}">{{ format_ms(g.pb) }}{% if g.pb is not none and g.pb != g.best %} <span class="small">{{ format_delta(g.pb - g.best) }}</span>{% endif %}</td><td class="num">{{ format_ms(g.median) }}</td><td class="num">{{ format_ms(g.worst) }}</td><td class="num">{{ format_ms(g.spread) }}</td></tr>
-    {% endfor %}
-  </table>
-  <p class="help">Big spread on a gate means the line there isn't settled yet; a PB-run segment far off the best means the PB has time left in it.</p>
 </div>
 {% endif %}
 
@@ -47,6 +76,20 @@
     {% endfor %}
   </table>
 </div>
+
+{% if gates %}
+<details class="card gate-details">
+  <summary>Gate consistency <span class="muted small">— segment time per crossing, {{ comparable }} comparable runs</span></summary>
+  <svg id="gate-chart" class="chart" viewBox="0 0 800 260"></svg>
+  <table class="mono small" style="margin-top:.8rem">
+    <tr><th>Gate</th><th class="num">Best</th><th class="num">PB run</th><th class="num">Median</th><th class="num">Worst</th><th class="num">Spread</th></tr>
+    {% for g in gates %}
+    <tr><td>{{ g.label }}</td><td class="num">{{ format_ms(g.best) }}</td><td class="num {{ delta_class(g.pb - g.best) if g.pb is not none }}">{{ format_ms(g.pb) }}{% if g.pb is not none and g.pb != g.best %} <span class="small">{{ format_delta(g.pb - g.best) }}</span>{% endif %}</td><td class="num">{{ format_ms(g.median) }}</td><td class="num">{{ format_ms(g.worst) }}</td><td class="num">{{ format_ms(g.spread) }}</td></tr>
+    {% endfor %}
+  </table>
+  <p class="help">Big spread on a gate means the line there isn't settled yet; a PB-run segment far off the best means the PB has time left in it.</p>
+</details>
+{% endif %}
 {% endblock %}
 {% block scripts %}
 <script>
@@ -92,4 +135,83 @@
   }
 })();
 </script>
+{% if analysis %}
+<script>
+(function () {
+  var A = {{ analysis.layout | tojson }}, COUNT = {{ analysis.count }}, LABELS = {{ analysis.labels | tojson }}, POINTS = {{ analysis.gate_points | tojson }};
+  var TRACK = {{ track_id }};
+  var $ = function (id) { return document.getElementById(id); };
+  var NS = "http://www.w3.org/2000/svg";
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  var layout = A.map(function (s) { return { name: s.name, first: s.first, last: s.last }; });
+  function label(k) { return LABELS[k] || ("#" + k); }
+  function sectionIndex(k) { for (var i = 0; i < layout.length; i++) if (k >= layout[i].first && k <= layout[i].last) return i; return -1; }
+
+  // Top-down map: gates in lap order, coloured by section.
+  var map = $("track-map"), drawMap = null;
+  if (map && POINTS.length > 1) {
+    var W = 360, H = 300, pad = 22, pts = POINTS.slice().sort(function (a, b) { return a[0] - b[0]; });
+    var xs = pts.map(function (p) { return p[1]; }), zs = pts.map(function (p) { return p[2]; });
+    var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs), minZ = Math.min.apply(null, zs), maxZ = Math.max.apply(null, zs);
+    var span = Math.max(maxX - minX, maxZ - minZ) || 1, scale = (Math.min(W, H) - 2 * pad) / span;
+    var ox = (W - (maxX - minX) * scale) / 2, oz = (H - (maxZ - minZ) * scale) / 2;
+    var px = function (p) { return ox + (p[1] - minX) * scale; }, py = function (p) { return H - (oz + (p[2] - minZ) * scale); };
+    drawMap = function () {
+      while (map.firstChild) map.removeChild(map.firstChild);
+      for (var i = 0; i < pts.length; i++) {
+        var a = pts[i], b = pts[(i + 1) % pts.length], si = sectionIndex(b[0]);
+        el("line", { x1: px(a), y1: py(a), x2: px(b), y2: py(b), class: "seg sec-" + (si >= 0 ? si % 8 : 0), "stroke-width": 3, "stroke-linecap": "round" }, map);
+      }
+      pts.forEach(function (p) {
+        var si = sectionIndex(p[0]);
+        var c = el("circle", { cx: px(p), cy: py(p), r: 4.5, class: "gate sec-" + (si >= 0 ? si % 8 : 0) }, map);
+        var t = el("title", {}, c); t.textContent = label(p[0]) + (si >= 0 ? " · " + (layout[si].name || "Section " + (si + 1)) : "");
+        if (p[0] === 1 || p[0] === COUNT || p[0] % 5 === 0) { var l = el("text", { x: px(p) + 6, y: py(p) - 5, class: "label" }, map); l.textContent = label(p[0]); }
+      });
+    };
+    drawMap();
+  }
+
+  // Editor: tap a gate to split there, tap a section's first gate to merge it back.
+  var editor = $("section-editor"), strip = $("gate-strip"), names = $("section-names");
+  function render() {
+    strip.innerHTML = ""; names.innerHTML = "";
+    for (var k = 1; k <= COUNT; k++) {
+      var si = sectionIndex(k), cell = document.createElement("button");
+      cell.type = "button"; cell.className = "g sec-" + (si % 8) + (layout[si].first === k ? " first" : ""); cell.textContent = label(k); cell.dataset.k = k;
+      cell.title = layout[si].first === k ? (si ? "merge into the previous section" : "lap start") : "start a new section here";
+      cell.onclick = function () { toggle(parseInt(this.dataset.k, 10)); };
+      strip.appendChild(cell);
+    }
+    layout.forEach(function (s, i) {
+      var lab = document.createElement("label");
+      lab.innerHTML = '<span class="sec-swatch sec-' + (i % 8) + '"></span><span class="muted small">' + label(s.first) + (s.last !== s.first ? "–" + label(s.last) : "") + "</span>";
+      var inp = document.createElement("input"); inp.value = s.name; inp.placeholder = "Section " + (i + 1); inp.maxLength = 40;
+      inp.oninput = function () { s.name = inp.value; };
+      lab.appendChild(inp); names.appendChild(lab);
+    });
+    if (drawMap) drawMap();
+  }
+  function toggle(k) {
+    var i = sectionIndex(k), s = layout[i];
+    if (s.first === k) { if (i === 0) return; layout[i - 1].last = s.last; layout.splice(i, 1); }
+    else { layout.splice(i + 1, 0, { name: "", first: k, last: s.last }); s.last = k - 1; }
+    render();
+  }
+  function post(url, body) {
+    return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.detail || "failed"); return j; }); });
+  }
+  $("btn-edit-sections").onclick = function () { editor.hidden = !editor.hidden; if (!editor.hidden) render(); };
+  $("btn-cancel-sections").onclick = function () { layout = A.map(function (s) { return { name: s.name, first: s.first, last: s.last }; }); editor.hidden = true; if (drawMap) drawMap(); };
+  $("btn-save-sections").onclick = function () {
+    post("/tracks/" + TRACK + "/sections", { count: COUNT, sections: layout }).then(function () { location.reload(); }).catch(function (e) { alert(e.message); });
+  };
+  $("btn-reset-sections").onclick = function () {
+    if (!confirm("Discard this layout and let Splitter suggest one from the data again?")) return;
+    post("/tracks/" + TRACK + "/sections/reset").then(function () { location.reload(); }).catch(function (e) { alert(e.message); });
+  };
+})();
+</script>
+{% endif %}
 {% endblock %}

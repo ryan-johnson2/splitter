@@ -39,6 +39,8 @@ class SegmentStats:
     avg_speed: float
     min_speed: float
     distance_m: float
+    min_accel: float | None = None  # hardest braking in the window, m/s^2 (negative)
+    max_accel: float | None = None  # hardest acceleration, m/s^2
 
 
 class TelemetryBuffer:
@@ -117,12 +119,18 @@ def segment_stats(window: list[Sample]) -> SegmentStats | None:
         return None
     speeds = [s.speed for s in window]
     distance = 0.0
+    accels: list[float] = []
     for a, b in pairwise(window):
         distance += math.dist((a.x, a.y, a.z), (b.x, b.y, b.z))
+        dt = (b.t_ms - a.t_ms) / 1000.0
+        if 0 < dt <= 0.5:
+            accels.append((b.speed - a.speed) / dt)
     return SegmentStats(
         samples=len(window),
         max_speed=max(speeds),
         avg_speed=sum(speeds) / len(speeds),
         min_speed=min(speeds),
         distance_m=distance,
+        min_accel=min(accels) if accels else None,
+        max_accel=max(accels) if accels else None,
     )

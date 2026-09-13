@@ -66,6 +66,9 @@ class Race(Base):
     avg_speed: Mapped[float | None]
     distance_m: Mapped[float | None]
     notes: Mapped[str] = mapped_column(Text, default="")
+    # Crashes found in the trace (core/crashes.py), JSON list of Crash dicts.
+    crashes: Mapped[str] = mapped_column(Text, default="")
+    crash_count: Mapped[int] = mapped_column(default=0)
 
     laps: Mapped[list[Lap]] = relationship(
         cascade="all, delete-orphan", order_by="Lap.lap", lazy="selectin"
@@ -89,6 +92,9 @@ class Lap(Base):
     max_speed: Mapped[float | None]
     avg_speed: Mapped[float | None]
     distance_m: Mapped[float | None]
+    min_speed: Mapped[float | None]
+    min_accel: Mapped[float | None]  # hardest braking, m/s^2
+    max_accel: Mapped[float | None]
 
 
 class GateTime(Base):
@@ -108,6 +114,24 @@ class GateTime(Base):
     max_speed: Mapped[float | None]
     avg_speed: Mapped[float | None]
     distance_m: Mapped[float | None]
+    min_speed: Mapped[float | None]
+    min_accel: Mapped[float | None]  # hardest braking, m/s^2
+    max_accel: Mapped[float | None]
+
+
+class TrackSection(Base):
+    """One named group of consecutive gates on a track (see core/sections.py)."""
+
+    __tablename__ = "track_sections"
+    __table_args__ = (Index("ix_track_sections_track", "track_id", "ordinal"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    track_id: Mapped[int]  # online track id; sections apply to every run on the track
+    ordinal: Mapped[int]
+    name: Mapped[str] = mapped_column(default="")
+    first_gate: Mapped[int]  # lap-relative segment index, inclusive
+    last_gate: Mapped[int]
+    updated_at: Mapped[datetime]
 
 
 class TelemetrySample(Base):

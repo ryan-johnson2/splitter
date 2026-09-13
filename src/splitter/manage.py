@@ -54,6 +54,42 @@ async def _cmd_settings(cfg: Config, args: argparse.Namespace) -> None:
             print(f"{key} = {value}")
 
 
+async def _cmd_backfill_crashes(cfg: Config, args: argparse.Namespace) -> None:
+    """Run crash detection over the stored traces of existing runs."""
+    import json
+
+    from sqlalchemy import select
+
+    from splitter.core import crashes as crash_detect
+    from splitter.db import repos
+    from splitter.db.engine import init_db
+    from splitter.db.models import Race
+
+    sf = _session_factory(cfg)
+    await init_db(sf.kw["bind"])
+    async with sf() as db:
+        stmt = select(Race).where(Race.telemetry_samples > 0).order_by(Race.id)
+        if not args.all:
+            stmt = stmt.where(Race.crashes == "")
+        races = list((await db.execute(stmt)).scalars().all())
+        runs = crashes = 0
+        for race in races:
+            samples = await repos.telemetry_for_race(db, race.id)
+            found = crash_detect.detect(samples)
+            if race.status == "finished" and race.total_time_ms:
+                found = [c for c in found if c.t_ms <= race.total_time_ms + 500]
+            found = crash_detect.attribute(found, race.gate_times)
+            race.crashes = json.dumps([c.to_dict() for c in found])
+            race.crash_count = len(found)
+            runs += 1
+            crashes += len(found)
+            if args.verbose and found:
+                where = ", ".join(f"L{c.lap} seg {c.segment} @ {c.t_ms / 1000:.1f}s" for c in found)
+                print(f"#{race.id:<5} {race.status:<8} {len(found)} crash(es): {where}")
+        await db.commit()
+    print(f"scanned {runs} runs, found {crashes} crashes")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="splitter", description="Splitter — VelociDrone lap timer"
@@ -67,6 +103,11 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("settings", help="show or set runtime settings")
     p.add_argument("key", nargs="?")
     p.add_argument("value", nargs="?")
+    p = sub.add_parser(
+        "backfill-crashes", help="detect crashes in the stored traces of existing runs"
+    )
+    p.add_argument("--all", action="store_true", help="re-scan runs already analysed")
+    p.add_argument("-v", "--verbose", action="store_true")
     p = sub.add_parser(
         "extract-catalog",
         help="regenerate the bundled quad/scene catalog from the game's settings.db",
@@ -97,6 +138,8 @@ def main(argv: list[str] | None = None) -> None:
         asyncio.run(_cmd_races(cfg, args))
     elif args.cmd == "settings":
         asyncio.run(_cmd_settings(cfg, args))
+    elif args.cmd == "backfill-crashes":
+        asyncio.run(_cmd_backfill_crashes(cfg, args))
     elif args.cmd == "extract-catalog":
         from pathlib import Path
 

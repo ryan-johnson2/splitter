@@ -348,3 +348,61 @@ async def test_install_controls_are_gated_on_environment(client: AsyncClient) ->
     assert "window.SPLITTER_DESKTOP" in html and 'classList.add("desktop")' in html
     assert 'params.get("source") === "pwa"' in html
     assert "appinstalled" in html and "env.browserOnly()" in html
+
+
+async def _fly_one(client: AsyncClient, scale: float = 1.0) -> None:
+    controller = client.app.state.controller  # type: ignore[attr-defined]
+    await controller.handle_event(h.session())
+    await controller.handle_event(h.status("start"))
+    await controller.handle_event(h.countdown(0))
+    for lap, gate, t, fin in h.two_lap_race(scale=scale):
+        await controller.handle_event(h.racedata(lap, gate, t, fin))
+    await controller.handle_event(h.status("race finished"))
+
+
+async def test_track_page_seeds_sections_and_the_editor_saves_them(client: AsyncClient) -> None:
+    await _fly_one(client)
+    await _fly_one(client, scale=1.1)
+    url = "/tracks/detail?track_id=500&quad_model=0&laps=3"
+    html = (await client.get(url)).text
+    assert 'id="sections-card"' in html and "auto-suggested" in html
+    assert "G3" in html and "S/F" in html  # lap-relative gate labels
+    assert 'id="gate-strip"' in html and "/tracks/500/sections" not in html.split("<script")[0]
+    # The gate table is still there, collapsed at the bottom.
+    assert "gate-details" in html and html.index("gate-details") > html.index("sections-card")
+
+    # Save a two-section layout (3 segments per lap in the test race).
+    r = await client.post(
+        "/tracks/500/sections",
+        json={
+            "count": 3,
+            "sections": [
+                {"name": "Opening", "first": 1, "last": 2},
+                {"name": "", "first": 3, "last": 3},
+            ],
+        },
+    )
+    assert r.status_code == 200
+    assert [s["name"] for s in r.json()["sections"]] == ["Opening", "Section 2"]
+    html = (await client.get(url)).text
+    assert "Opening" in html and "auto-suggested" not in html
+    # Gaps are refused.
+    r = await client.post(
+        "/tracks/500/sections", json={"count": 3, "sections": [{"first": 1, "last": 1}]}
+    )
+    assert r.status_code == 400
+    # Reset drops the layout; the next view suggests again.
+    assert (await client.post("/tracks/500/sections/reset")).status_code == 200
+    assert "auto-suggested" in (await client.get(url)).text
+
+
+async def test_race_page_shows_sections_against_the_pb(client: AsyncClient) -> None:
+    await _fly_one(client)  # PB
+    await _fly_one(client, scale=1.1)  # slower, compared to it
+    await client.get("/tracks/detail?track_id=500&quad_model=0&laps=3")  # seeds the sections
+    html = (await client.get("/races/2")).text
+    assert "<h2>Sections</h2>" in html and "Lap 1" in html and "Lap 2" in html
+    assert "+0.200" in html  # a 2 s segment flown 10% slower than the PB
+    assert "Gate crossings" in html and html.index("Gate crossings") > html.index(
+        "<h2>Sections</h2>"
+    )

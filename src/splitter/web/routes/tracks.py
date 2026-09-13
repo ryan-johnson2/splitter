@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from splitter.core import quads
+from splitter.core import sections as sec
 from splitter.core.splits import theoretical_best
 from splitter.db import repos
+from splitter.web import analysis
 from splitter.web.templating import templates
 
 router = APIRouter(prefix="/tracks")
@@ -30,12 +32,13 @@ async def track_page(
     key = repos.PBKey(track_id, quad_model, laps)
     async with request.app.state.session_factory() as db:
         races = await repos.races_for_key(db, key)
-    if not key.valid:
-        races = [r for r in races if r.track_name == track]
+        if not key.valid:
+            races = [r for r in races if r.track_name == track]
+        finished = [r for r in races if r.status == "finished" and r.total_time_ms is not None]
+        best = min(finished, key=lambda r: r.total_time_ms or 0) if finished else None
+        sections = await analysis.track_analysis(db, track_id, races, best) if key.valid else None
     track = races[-1].track_name if races else track
     quad = quads.model_name(quad_model) or (races[-1].quad_type if races else "")
-    finished = [r for r in races if r.status == "finished" and r.total_time_ms is not None]
-    best = min(finished, key=lambda r: r.total_time_ms or 0) if finished else None
 
     # Progression: total time per finished run, in order.
     progression = [
@@ -90,5 +93,37 @@ async def track_page(
             "progression": progression,
             "gates": gates,
             "comparable": len(comparable),
+            "analysis": sections,
+            "section_stats": sorted(sections.stats, key=lambda s: -(s.on_table_ms or -1))
+            if sections
+            else [],
         },
     )
+
+
+@router.post("/{track_id}/sections")
+async def sections_save(request: Request, track_id: int) -> Any:
+    """Replace a track's sections: ``{"count": N, "sections": [{name, first, last}, …]}``."""
+    body = await request.json()
+    try:
+        count = int(body.get("count", 0))
+        items = [
+            sec.Section(i, str(s.get("name", "")), int(s["first"]), int(s["last"]))
+            for i, s in enumerate(body.get("sections", []), start=1)
+        ]
+        valid = sec.validate(items, count)
+    except (KeyError, TypeError, ValueError) as e:
+        raise HTTPException(400, str(e)) from e
+    if track_id <= 0:
+        raise HTTPException(400, "sections need an online track id")
+    async with request.app.state.session_factory() as db:
+        await repos.save_sections(db, track_id, valid)
+    return {"ok": True, "sections": [s.to_dict() for s in valid]}
+
+
+@router.post("/{track_id}/sections/reset")
+async def sections_reset(request: Request, track_id: int) -> Any:
+    """Drop the layout; the next view of the track re-suggests it from the data."""
+    async with request.app.state.session_factory() as db:
+        await repos.save_sections(db, track_id, [])
+    return {"ok": True}

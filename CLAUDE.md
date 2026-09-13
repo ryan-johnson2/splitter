@@ -103,6 +103,42 @@ per lap from the full stream, and stores a downsampled trace
 race page. Speed = |velocity| in m/s, shown as km/h. `imu` frames are logged
 to the event log at most once per 5 s.
 
+## Sections, crashes, geometry (0.4.0, issue #5)
+
+- **Lap-relative segments**: `core/sections.py::lap_segments` turns a run's
+  crossings into `{lap: [segment 1..G]}` — lap-0 crossings and the first lap-1
+  crossing (the S/F that ends the holeshot) are not segments; a crossing with
+  `ends_lap` set is the lap's last segment (G = `gates_per_lap`). Nothing else
+  needs the wire ordinals; labels ("G3"… "S/F") come from `segment_labels`.
+- **Sections** (`track_sections` table, keyed by online `track_id` only) cover
+  `1..G` contiguously. First view of a track page seeds them
+  (`web/analysis.py::track_analysis` → `sections.suggest`: the largest section is
+  split at its best-scoring boundary — heading change at the previous gate,
+  speed-regime change, spacing jump — until 8 sections / 3-gate minimum; thirds
+  when there is nothing to go on). Edited on the track page (tap a gate to split,
+  tap a section's first gate to merge; `POST /tracks/{id}/sections`, `…/reset`).
+- **Gate positions** (`core/geometry.py`): the drone's interpolated position at
+  each crossing time, averaged over the PB + 7 most recent traced runs; gives the
+  top-down map on the track page, spacing and heading change per gate.
+- **Crashes** (`core/crashes.py`): events in the trace of every run — the pilot
+  often flies on, so abort ≠ crash and the game sends nothing. A single-step decel
+  ≤ −120 m/s² or ≥ 70 % speed loss in 100 ms (at ≥ 8 m/s, ≤ −80 m/s² over the
+  window), confirmed by a gyro spike above the run's 95th percentile (floor 300)
+  or a ≥ 300 ms dwell below 3 m/s; bounces within 1.5 s merge. Measured on real
+  runs: crashes −130…−320 m/s², gyro 700–1170; braking −60…−85, gyro p99 ≈ 570.
+  Detected at race end on the full 60 Hz buffer (finished runs: only up to the
+  finish), stamped with `(lap, segment)` and stored as JSON on `races.crashes`
+  (+ `crash_count`); `splitter backfill-crashes [--all]` scans stored 20 Hz
+  traces for older runs. Per-segment `min_speed` / `min_accel` / `max_accel`
+  are recorded on gate_times and laps at crossing time (not recoverable later).
+- **Pages**: track page = sections table ranked by *on the table* (PB per-lap
+  section time − best-ever), spread (IQR), min speed, crashes, verdict (`line`
+  when the PB is ≥ max(150 ms, 6 %) off the best; `mistakes` when ≥ 15 % of laps
+  blow up ≥ 1.5× median; else `solid`), trend (last 3 runs vs the 3 before), map,
+  editor; gate consistency collapsed at the bottom. Race page = this run per
+  section and lap vs the same lap of the PB, crash marks (✕ on the path and speed
+  charts), gate crossings collapsed at the bottom. Live page untouched (by design).
+
 ## Wire facts to remember
 
 All race-event scalars are strings (`"3"`, `"69.711"`, `"True"`), `uid` in

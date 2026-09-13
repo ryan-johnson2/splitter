@@ -10,8 +10,10 @@ from typing import Any
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from splitter.core.crashes import Crash
+from splitter.core.sections import Section
 from splitter.core.splits import Reference, build_reference
-from splitter.db.models import EventLog, GateTime, Lap, Race, TelemetrySample
+from splitter.db.models import EventLog, GateTime, Lap, Race, TelemetrySample, TrackSection
 from splitter.util import utcnow
 
 
@@ -318,3 +320,61 @@ async def gate_time_count(session: AsyncSession, race_id: int) -> int:
         ).scalar()
         or 0
     )
+
+
+# ── sections / crashes ────────────────────────────────────────────
+
+
+async def sections_for_track(session: AsyncSession, track_id: int) -> list[Section]:
+    stmt = (
+        select(TrackSection).where(TrackSection.track_id == track_id).order_by(TrackSection.ordinal)
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    return [Section(r.ordinal, r.name, r.first_gate, r.last_gate) for r in rows]
+
+
+async def save_sections(
+    session: AsyncSession, track_id: int, sections: list[Section]
+) -> list[Section]:
+    """Replace the track's sections (already validated) in one go."""
+    await session.execute(delete(TrackSection).where(TrackSection.track_id == track_id))
+    now = utcnow()
+    session.add_all(
+        TrackSection(
+            track_id=track_id,
+            ordinal=s.ordinal,
+            name=s.name,
+            first_gate=s.first,
+            last_gate=s.last,
+            updated_at=now,
+        )
+        for s in sections
+    )
+    await session.commit()
+    return sections
+
+
+async def races_with_crashes(session: AsyncSession, track_id: int) -> list[Race]:
+    """Every run on the track that recorded at least one crash (any status)."""
+    stmt = (
+        select(Race).where((Race.track_id == track_id) & (Race.crash_count > 0)).order_by(Race.id)
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+def crashes_of(race: Race) -> list[Crash]:
+    if not race.crashes:
+        return []
+    return [Crash.from_dict(d) for d in json.loads(race.crashes)]
+
+
+async def races_with_telemetry(session: AsyncSession, race_ids: list[int]) -> list[int]:
+    """Subset of ``race_ids`` that have a stored trace."""
+    if not race_ids:
+        return []
+    stmt = (
+        select(TelemetrySample.race_id)
+        .where(TelemetrySample.race_id.in_(race_ids))
+        .group_by(TelemetrySample.race_id)
+    )
+    return [int(r) for r in (await session.execute(stmt)).scalars().all()]

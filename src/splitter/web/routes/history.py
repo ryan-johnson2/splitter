@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse
 
 from splitter.core import quads
 from splitter.db import repos
+from splitter.web import analysis
 from splitter.web.templating import redirect_with_flash, templates
 
 router = APIRouter(prefix="/races")
@@ -43,6 +44,15 @@ async def race_page(request: Request, race_id: int) -> Any:
         best = await repos.get_best_race(db, repos.race_key(race))
         reference = repos.reference_from_race(best) if best and best.id != race.id else None
         samples = await repos.telemetry_for_race(db, race_id)
+        sections = await repos.sections_for_track(db, race.track_id) if race.track_id else []
+    count = race.gates_per_lap or 0
+    section_rows = analysis.race_sections(race, best, sections, count) if sections and count else []
+    lap_numbers = sorted(sec_lap_numbers(race))
+    crashes = repos.crashes_of(race)
+    crash_marks = [
+        [c.t_ms, round(c.x, 2), round(c.y, 2), round(c.z, 2), c.lap, c.segment] for c in crashes
+    ]
+    labels = analysis.section_labels_for(race, best, count)
     gate_rows = []
     for g in race.gate_times:
         gate_rows.append(
@@ -71,8 +81,19 @@ async def race_page(request: Request, race_id: int) -> Any:
             "lap_rows": lap_rows,
             "telemetry": telemetry,
             "gate_marks": gate_marks,
+            "section_rows": section_rows,
+            "lap_numbers": lap_numbers,
+            "crashes": crashes,
+            "crash_marks": crash_marks,
+            "labels": labels,
         },
     )
+
+
+def sec_lap_numbers(race: Any) -> list[int]:
+    from splitter.core.sections import lap_segments
+
+    return list(lap_segments(race.gate_times))
 
 
 def _ids(ids: list[int], limit: int = 12) -> str:

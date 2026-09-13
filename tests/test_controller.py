@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from sqlalchemy import select
 
 from splitter.db import repos
@@ -290,3 +292,58 @@ async def test_zero_total_never_reference(session_factory) -> None:
         best = await repos.recalculate_best(db, repos.PBKey(5, 0, 3))
         assert best == 2
         assert (await repos.get_best_race(db, repos.PBKey(5, 0, 3))).total_time_ms == 9000  # type: ignore[union-attr]
+
+
+def _imu(ts_ms: float, x: float, vx: float, roll: float) -> h.Event:
+    return h.ev(
+        "imu",
+        {
+            "roll": roll,
+            "pitch": 0.0,
+            "yaw": 0.0,
+            "PositionX": x,
+            "PositionY": 1.0,
+            "PositionZ": 0.0,
+            "AttitudeX": 0.0,
+            "AttitudeY": 0.0,
+            "AttitudeZ": 0.0,
+            "AttitudeW": 1.0,
+            "SpeedX": vx,
+            "SpeedY": 0.0,
+            "SpeedZ": 0.0,
+            "timestamp": ts_ms,
+        },
+    )
+
+
+async def test_crashes_are_detected_and_attributed(
+    controller: RaceController, hub: LiveHub, session_factory
+) -> None:
+    """A hard stop with a gyro spike mid-lap becomes one crash on the race row."""
+    await controller.handle_event(h.session())
+    q = hub.subscribe()
+    await controller.handle_event(h.status("start"))
+    await controller.handle_event(h.racetype())
+    for n in (3, 2, 1, 0):
+        await controller.handle_event(h.countdown(n))
+    ts = 1_000_000.0
+    for lap, gate, t, fin in h.two_lap_race():
+        while ts - 1_000_000.0 < t * 1000:
+            rel = (ts - 1_000_000.0) / 1000
+            crashed = 4.5 <= rel < 5.0  # between the lap-1 gates at 4 s and 6 s
+            speed = 2.0 if crashed else 20.0
+            spike = 950.0 if 4.5 <= rel < 4.6 else 0.0  # the gyro spike that confirms it
+            await controller.handle_event(_imu(ts, 20 * rel, speed, spike))
+            ts += 1000 / 60
+        await controller.handle_event(h.racedata(lap, gate, t, fin))
+    await controller.handle_event(h.status("race finished"))
+    result = h.drain(q)[-1]["data"]
+    assert result["crashes"] == 1
+    async with session_factory() as db:
+        race = (await db.execute(select(Race))).scalar_one()
+        assert race.crash_count == 1
+        (crash,) = json.loads(race.crashes)
+        assert crash["lap"] == 1 and crash["segment"] == 2 and 4400 <= crash["t_ms"] <= 4600
+        assert crash["speed_before"] == 20.0 and crash["decel"] <= -120
+        gate = (await db.execute(select(GateTime).where(GateTime.seq == 3))).scalar_one()
+        assert gate.min_speed == 2.0 and gate.min_accel is not None and gate.min_accel <= -120

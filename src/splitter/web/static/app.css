@@ -243,3 +243,44 @@ html.desktop #btn-fullscreen, html.desktop #btn-install { display:none; }
 details.picker-manual { border:0; padding:0; margin:0 0 .8rem; }
 details.picker-manual summary { font-weight:400; }
 details.picker-manual .inline-form { margin-top:.4rem; }
+
+/* ── sections (track + race pages) ── */
+:root { --sec-0:#4cc9f0; --sec-1:#f7b545; --sec-2:#80ed99; --sec-3:#f472b6; --sec-4:#a78bfa; --sec-5:#fb923c; --sec-6:#34d399; --sec-7:#60a5fa; }
+.sections-layout { display:grid; grid-template-columns:minmax(220px, 320px) 1fr; gap:1rem; align-items:start; }
+.sections-layout .table-wrap { overflow-x:auto; }
+.sections-table td.name { white-space:nowrap; font-family:inherit; }
+.sec-swatch { display:inline-block; width:.7rem; height:.7rem; border-radius:3px; margin-right:.45rem; vertical-align:-1px; }
+.sec-swatch.sec-0, .g.sec-0 { background:color-mix(in srgb, var(--sec-0) 45%, transparent); }
+.sec-swatch.sec-1, .g.sec-1 { background:color-mix(in srgb, var(--sec-1) 45%, transparent); }
+.sec-swatch.sec-2, .g.sec-2 { background:color-mix(in srgb, var(--sec-2) 45%, transparent); }
+.sec-swatch.sec-3, .g.sec-3 { background:color-mix(in srgb, var(--sec-3) 45%, transparent); }
+.sec-swatch.sec-4, .g.sec-4 { background:color-mix(in srgb, var(--sec-4) 45%, transparent); }
+.sec-swatch.sec-5, .g.sec-5 { background:color-mix(in srgb, var(--sec-5) 45%, transparent); }
+.sec-swatch.sec-6, .g.sec-6 { background:color-mix(in srgb, var(--sec-6) 45%, transparent); }
+.sec-swatch.sec-7, .g.sec-7 { background:color-mix(in srgb, var(--sec-7) 45%, transparent); }
+.chart.map .seg.sec-0, .chart.map .gate.sec-0 { stroke:var(--sec-0); fill:var(--sec-0); }
+.chart.map .seg.sec-1, .chart.map .gate.sec-1 { stroke:var(--sec-1); fill:var(--sec-1); }
+.chart.map .seg.sec-2, .chart.map .gate.sec-2 { stroke:var(--sec-2); fill:var(--sec-2); }
+.chart.map .seg.sec-3, .chart.map .gate.sec-3 { stroke:var(--sec-3); fill:var(--sec-3); }
+.chart.map .seg.sec-4, .chart.map .gate.sec-4 { stroke:var(--sec-4); fill:var(--sec-4); }
+.chart.map .seg.sec-5, .chart.map .gate.sec-5 { stroke:var(--sec-5); fill:var(--sec-5); }
+.chart.map .seg.sec-6, .chart.map .gate.sec-6 { stroke:var(--sec-6); fill:var(--sec-6); }
+.chart.map .seg.sec-7, .chart.map .gate.sec-7 { stroke:var(--sec-7); fill:var(--sec-7); }
+.chart.map .seg { stroke-opacity:.8; }
+.chart.map .gate { stroke:var(--card); stroke-width:1.5; }
+.chart .crash { stroke:var(--bad); stroke-width:2.5; stroke-linecap:round; }
+.pill.verdict.line { color:var(--warn); border-color:color-mix(in srgb, var(--warn) 50%, transparent); }
+.pill.verdict.mistakes { color:var(--bad); border-color:color-mix(in srgb, var(--bad) 50%, transparent); }
+.pill.verdict.solid { color:var(--ok); border-color:color-mix(in srgb, var(--ok) 50%, transparent); }
+.crash-mark { color:var(--bad); font-weight:700; }
+.gate-strip { display:flex; flex-wrap:wrap; gap:3px; margin:.4rem 0 .8rem; }
+.gate-strip .g { flex:1 0 2.4rem; min-width:2.4rem; padding:.4rem .15rem; font-size:.75rem; line-height:1; border:1px solid transparent; border-radius:5px; color:var(--fg); }
+.gate-strip .g.first { border-left:3px solid var(--fg); }
+.gate-strip .g:hover { border-color:var(--fg); }
+.section-names { display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); gap:.4rem .9rem; margin-bottom:.8rem; }
+.section-names label { display:flex; align-items:center; gap:.45rem; font-size:.85rem; }
+.section-names input { flex:1; min-width:0; }
+details.gate-details { margin-top:1.2rem; }
+details.gate-details > summary { font-size:1rem; }
+details.gate-details h2.small { font-size:.95rem; }
+@media (max-width:900px) { .sections-layout { grid-template-columns:1fr; } .sections-layout .chart.map { max-width:340px; margin:0 auto; } }

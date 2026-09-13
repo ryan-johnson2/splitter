@@ -14,9 +14,11 @@ the first racedata after arming starts the race instead.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -34,6 +36,7 @@ from velocidrone_ws import (
     SessionEvent,
 )
 
+from splitter.core import crashes as crash_detect
 from splitter.core import quads
 from splitter.core.splits import Reference
 from splitter.core.telemetry import SegmentStats, TelemetryBuffer
@@ -52,17 +55,37 @@ IMU_LOG_EVERY_S = 5.0  # how often an imu frame lands in the event log
 LIVE_TELEMETRY_HZ = 4.0  # live speed/position messages to the browser
 
 
+@dataclass(frozen=True)
+class _CrossingRef:
+    """What crash attribution needs to know about a crossing."""
+
+    seq: int
+    lap: int
+    ends_lap: int | None
+    cumulative_ms: int
+
+
 def _iso(dt: datetime | None) -> str | None:
     return dt.replace(microsecond=0).isoformat() + "Z" if dt else None
 
 
 def _stats_dict(stats: SegmentStats | None) -> dict[str, float | None]:
     if stats is None:
-        return {"max_speed": None, "avg_speed": None, "distance_m": None}
+        return {
+            "max_speed": None,
+            "avg_speed": None,
+            "distance_m": None,
+            "min_speed": None,
+            "min_accel": None,
+            "max_accel": None,
+        }
     return {
         "max_speed": round(stats.max_speed, 2),
         "avg_speed": round(stats.avg_speed, 2),
         "distance_m": round(stats.distance_m, 1),
+        "min_speed": round(stats.min_speed, 2),
+        "min_accel": round(stats.min_accel, 1) if stats.min_accel is not None else None,
+        "max_accel": round(stats.max_accel, 1) if stats.max_accel is not None else None,
     }
 
 
@@ -572,6 +595,21 @@ class RaceController:
                 race.distance_m = round(whole.distance_m, 1)
             stored = self._store_telemetry(db, race_id)
             race.telemetry_samples = stored
+            # Crashes are events in the trace, whether or not the run went on.
+            found = crash_detect.detect(self.telemetry.samples)
+            if not aborted:
+                found = [c for c in found if c.t_ms <= tracker.total_ms + 500]
+            found = crash_detect.attribute(
+                found,
+                [
+                    _CrossingRef(
+                        c.seq, c.lap, c.lap_done.lap if c.lap_done else None, c.cumulative_ms
+                    )
+                    for c in tracker.crossings
+                ],
+            )
+            race.crashes = json.dumps([c.to_dict() for c in found])
+            race.crash_count = len(found)
             await db.commit()
             is_best = False
             if not aborted:
@@ -598,6 +636,7 @@ class RaceController:
                 "avg_speed": race.avg_speed,
                 "distance_m": race.distance_m,
                 "telemetry_samples": stored,
+                "crashes": race.crash_count,
                 "ended_at": _iso(race.ended_at),
             }
         log.info(
