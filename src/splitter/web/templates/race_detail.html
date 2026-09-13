@@ -90,7 +90,7 @@
 </details>
 {% endblock %}
 {% block scripts %}
-<script src="/static/picker.js"></script>
+<script src="/static/picker.js?v={{ app_version }}"></script>
 <script>
   Splitter.trackPicker(document.getElementById("edit-track-picker"), { emptyText: "Leave as is, or search above to re-attribute this run." });
   Splitter.quadPicker(document.getElementById("edit-quad-picker")).set({{ race.quad_model_id }}, {{ race.quad_class_id }});

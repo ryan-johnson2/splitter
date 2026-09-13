@@ -154,7 +154,7 @@
 
   // ── messages ──────────────────────────────────────────────────
   var handlers = {
-    snapshot: applySnapshot,
+    snapshot: function (snap) { try { applySnapshot(snap); } catch (e) { console.error("snapshot render failed", e); } },
     status: renderConnection,
     session: function (s) { renderSession(s); renderReference(state.reference); },
     reference: renderReference,
@@ -277,6 +277,7 @@
       .catch(function (e) { toast(e.message + " — set the game PC address in Settings", "warn"); });
   };
 
-  applySnapshot(window.SPLITTER_SNAPSHOT || {});
+  // Rendering must never keep the live socket from opening.
+  try { applySnapshot(window.SPLITTER_SNAPSHOT || {}); } catch (e) { console.error("initial render failed", e); }
   connect();
 })();

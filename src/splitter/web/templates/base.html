@@ -12,9 +12,9 @@
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/icon-256.png">
   <title>{% block title %}{{ brand_name }}{% endblock %}</title>
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/app.css?v={{ app_version }}">
   <script>window.SPLITTER_TIME_FORMAT = {{ time_format | tojson }}; window.SPLITTER_PACE_YELLOW_S = {{ pace_yellow_s | tojson }};</script>
-  <script src="/static/fmt.js"></script>
+  <script src="/static/fmt.js?v={{ app_version }}"></script>
   {% block head %}{% endblock %}
 </head>
 <body>

@@ -85,6 +85,6 @@
 {% endblock %}
 {% block scripts %}
 <script>window.SPLITTER_SNAPSHOT = {{ snapshot | tojson }};</script>
-<script src="/static/picker.js"></script>
-<script src="/static/live.js"></script>
+<script src="/static/picker.js?v={{ app_version }}"></script>
+<script src="/static/live.js?v={{ app_version }}"></script>
 {% endblock %}

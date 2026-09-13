@@ -77,8 +77,8 @@
 {% endblock %}
 {% block scripts %}
 {% if races %}
-<script src="/static/picker.js"></script>
-<script src="/static/races.js"></script>
+<script src="/static/picker.js?v={{ app_version }}"></script>
+<script src="/static/races.js?v={{ app_version }}"></script>
 <script>
   Splitter.racesPage({
     track: Splitter.trackPicker(document.getElementById("bulk-track-picker"), { emptyText: "No track change.", onPick: function () { Splitter.racesPage.refresh(); } }),
