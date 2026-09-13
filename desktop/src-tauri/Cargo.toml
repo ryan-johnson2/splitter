@@ -9,7 +9,7 @@
 #     cd desktop/src-tauri && npx @tauri-apps/cli@2 build --no-bundle
 [package]
 name = "splitter-desktop"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Splitter native desktop app — runs the Splitter lap timer and opens it in a window."
 default-run = "splitter-desktop"
