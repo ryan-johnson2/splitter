@@ -9,7 +9,7 @@ const CACHE = "splitter-" + VERSION;
 // only ever pair with the script/css of its own build (a cache-first worker
 // serving an older live.js against a newer page once broke the live socket).
 const V = "?v=" + VERSION;
-const SHELL = ["/", "/races", "/tracks", "/settings", "/static/app.css" + V, "/static/fmt.js" + V,
+const SHELL = ["/", "/races", "/tracks", "/settings", "/static/app.css" + V, "/static/fmt.js" + V, "/static/link.js" + V,
   "/static/live.js" + V, "/static/picker.js" + V, "/static/races.js" + V,
   "/static/icon.svg", "/static/icon-256.png", "/static/icon-512.png"];
 

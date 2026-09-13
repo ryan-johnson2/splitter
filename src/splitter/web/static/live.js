@@ -1,8 +1,8 @@
-/* Live page: one websocket, a snapshot on connect, then incremental messages. */
+/* Live page: rides the shared link (link.js): a snapshot on connect, then incremental messages. */
 (function () {
   "use strict";
   var $ = function (id) { return document.getElementById(id); };
-  var state = { race: null, reference: null, session: null, lastCrossing: null, phase: "idle", speed: 0, ws: null, connected: false, lastResult: null };
+  var state = { race: null, reference: null, session: null, lastCrossing: null, phase: "idle", speed: 0, connected: false, lastResult: null };
   var timer = null;
 
   var fmt = Splitter.fmt;  // honours the Settings "Time format"
@@ -45,13 +45,11 @@
   }
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
 
+  // The header indicators are painted by link.js; this only tracks the phase.
   function renderConnection(c) {
     state.connected = !!(c && c.connected);
-    var dot = $("conn-dot"), label = $("conn-label");
-    dot.className = "conn " + (c.connected ? "on" : (c.state === "connecting" || c.state === "reconnecting") ? "busy" : "");
-    label.textContent = c.connected ? "game connected" : c.state === "idle" ? "game offline" : c.state + (c.attempts ? " (" + c.attempts + ")" : "");
-    if (!c.connected && state.phase === "idle") setPhase("offline");
-    if (c.connected && state.phase === "offline") setPhase("idle");
+    if (!state.connected && state.phase === "idle") setPhase("offline");
+    if (state.connected && state.phase === "offline") setPhase("idle");
   }
 
   function renderReference(ref) {
@@ -198,19 +196,11 @@
   };
 
   function connect() {
-    var proto = location.protocol === "https:" ? "wss://" : "ws://";
-    var ws = new WebSocket(proto + location.host + "/ws/live");
-    state.ws = ws;
-    ws.onopen = function () { $("ws-state").textContent = "live"; };
-    ws.onmessage = function (ev) {
-      var msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
-      var h = handlers[msg.type]; if (h) h(msg.data);
-    };
-    ws.onclose = function () { $("ws-state").textContent = "reconnecting"; setTimeout(connect, 1500); };
-    ws.onerror = function () { ws.close(); };
+    var link = Splitter.link;
+    Object.keys(handlers).forEach(function (type) { link.on(type, handlers[type]); });
+    // Link down: the game state is unknown, so do not claim idle-and-connected.
+    link.on("close", function () { renderConnection(null); });
   }
-  setInterval(function () { if (state.ws && state.ws.readyState === 1) state.ws.send("ping"); }, 20000);
-  document.addEventListener("visibilitychange", function () { if (!document.hidden && state.ws && state.ws.readyState === 1) state.ws.send("snapshot"); });
 
   // ── session dialog ────────────────────────────────────────────
   var dlg = $("session-dialog");
@@ -258,7 +248,9 @@
     fsBtn.textContent = fs && !focus ? "🡼" : "⛶"; fsBtn.title = fs ? "leave fullscreen" : "fullscreen, menus visible";
     focusBtn.classList.toggle("primary", focus); focusBtn.title = focus ? "show menus" : "focus: fullscreen, race only";
   }
-  var standalone = root.classList.contains("standalone");
+  // Installed as an app or inside the native shell there is no browser chrome
+  // to hide, so focus is just the layout (and the plain-fullscreen button is gone).
+  var standalone = root.classList.contains("standalone") || root.classList.contains("desktop");
   fsBtn.onclick = function () {
     if (document.fullscreenElement) { document.exitFullscreen(); return; }
     root.classList.remove("focus"); enterFullscreen();

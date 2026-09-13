@@ -19,9 +19,21 @@ Socket.IO + manual session entry); built in Marshal's shape.
   (PB deltas by crossing index), `telemetry.py::TelemetryBuffer` (IMU samples
   → per-segment speed/distance, downsampling).
 - `live/hub.py::LiveHub` fans messages out to browser sockets (per-client
-  queues, oldest dropped when full). The live page gets a full `snapshot` on
-  connect and can ask for another with a `"snapshot"` text frame (used on tab
-  focus).
+  queues, oldest dropped when full). **Every page** opens one socket
+  (`static/link.js`, loaded by `base.html`): it paints the two header
+  indicators — *Splitter* (this socket: live / connecting / lost) and *Game*
+  (the bridge state, shown as *unknown* whenever the socket is down so a stale
+  page can never claim the game is connected) — and re-dispatches messages
+  via `Splitter.link.on(type, fn)`; `live.js` subscribes instead of opening
+  its own. A client gets a full `snapshot` on connect and can ask for another
+  with a `"snapshot"` text frame (used on tab focus).
+- Where the page runs is decided in `base.html` before anything renders:
+  `html.desktop` when the Tauri shell's init script set `window.SPLITTER_DESKTOP`
+  (`desktop/src-tauri/src/lib.rs`), `html.standalone` when installed as a PWA
+  (display-mode media queries, re-checked on change, the `?source=pwa` start
+  URL, or a sessionStorage flag carried across navigations). Both hide the
+  browser-only controls (Install app, ⛶ fullscreen); desktop also skips the
+  service worker. `Splitter.env` exposes the same answers to scripts.
 - SQLite (aiosqlite + SQLAlchemy 2.0 async, WAL). `create_all` at startup plus
   automatic `ADD COLUMN` for additive changes (`db/engine.py::init_db`).
 - Runtime knobs live in the `settings` table (`db/runtime_settings.py`),

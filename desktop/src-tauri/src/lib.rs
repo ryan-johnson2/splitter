@@ -91,6 +91,12 @@ pub fn run() {
                 WebviewUrl::External(url.parse().expect("sidecar URL is valid")),
             )
             .title("Splitter")
+            // Runs before every page's own scripts: base.html reads it to hide the
+            // browser-only controls (install, fullscreen) and skip the service worker.
+            .initialization_script(format!(
+                "window.SPLITTER_DESKTOP = {:?};",
+                env!("SPLITTER_BUILD")
+            ))
             .inner_size(1180.0, 820.0)
             .min_inner_size(720.0, 520.0)
             .build()?;

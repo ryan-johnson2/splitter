@@ -329,3 +329,22 @@ async def test_pace_setting_roundtrip(client: AsyncClient) -> None:
     assert r.status_code == 303
     assert "SPLITTER_PACE_YELLOW_S = 3.5" in (await client.get("/")).text
     assert 'name="pace_yellow_s"' in (await client.get("/settings")).text
+
+
+async def test_header_has_link_and_game_indicators(client: AsyncClient) -> None:
+    """#7: the page's link to the server and the server's link to the game are separate."""
+    html = (await client.get("/races")).text
+    assert 'id="link-dot"' in html and 'id="link-label"' in html
+    assert 'id="game-dot"' in html and 'id="game-label"' in html
+    assert "/static/link.js?v=" in html
+    # Every page carries the link; the live page must not open a second socket.
+    live = (await client.get("/")).text
+    assert "/static/link.js?v=" in live and 'id="ws-state"' not in live
+
+
+async def test_install_controls_are_gated_on_environment(client: AsyncClient) -> None:
+    """#6/#8: the shell's webview flags itself; installed PWAs are detected robustly."""
+    html = (await client.get("/")).text
+    assert "window.SPLITTER_DESKTOP" in html and 'classList.add("desktop")' in html
+    assert 'params.get("source") === "pwa"' in html
+    assert "appinstalled" in html and "env.browserOnly()" in html

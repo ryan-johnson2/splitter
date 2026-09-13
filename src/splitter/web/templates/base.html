@@ -15,6 +15,30 @@
   <link rel="stylesheet" href="/static/app.css?v={{ app_version }}">
   <script>window.SPLITTER_TIME_FORMAT = {{ time_format | tojson }}; window.SPLITTER_PACE_YELLOW_S = {{ pace_yellow_s | tojson }};</script>
   <script src="/static/fmt.js?v={{ app_version }}"></script>
+  <script>
+    // Where the page runs, before anything renders: "desktop" inside the native
+    // shell (its webview sets window.SPLITTER_DESKTOP), "standalone" when installed
+    // as a PWA. Both hide the browser-only controls (install, fullscreen).
+    (function () {
+      var root = document.documentElement, params = new URLSearchParams(location.search);
+      var stored = false; try { stored = sessionStorage.getItem("splitter.standalone") === "1"; } catch (e) {}
+      function displayMode() { return ["standalone", "fullscreen", "minimal-ui"].some(function (m) { return window.matchMedia("(display-mode: " + m + ")").matches; }); }
+      function installed() { return displayMode() || window.navigator.standalone === true || params.get("source") === "pwa" || stored; }
+      function apply() {
+        var s = installed();
+        root.classList.toggle("standalone", s);
+        if (s) { try { sessionStorage.setItem("splitter.standalone", "1"); } catch (e) {} }
+      }
+      if (window.SPLITTER_DESKTOP) root.classList.add("desktop");
+      apply();
+      ["standalone", "fullscreen", "minimal-ui"].forEach(function (m) {
+        var q = window.matchMedia("(display-mode: " + m + ")");
+        if (q.addEventListener) q.addEventListener("change", apply); else if (q.addListener) q.addListener(apply);
+      });
+      window.Splitter = window.Splitter || {};
+      window.Splitter.env = { desktop: !!window.SPLITTER_DESKTOP, installed: installed, browserOnly: function () { return !window.SPLITTER_DESKTOP && !installed(); } };
+    })();
+  </script>
   {% block head %}{% endblock %}
 </head>
 <body>
@@ -29,7 +53,10 @@
     <a href="/tracks" {% if path.startswith("/tracks") %}class="active"{% endif %}>Tracks</a>
     <a href="/settings" {% if path.startswith("/settings") %}class="active"{% endif %}>Settings</a>
   </nav>
-  <span class="who"><span class="conn {% if game_connected %}on{% endif %}" id="conn-dot" title="game connection"></span> <span id="conn-label">{{ "game connected" if game_connected else "game offline" }}</span></span>
+  <span class="who">
+    <span class="ind" title="this page's live link to the Splitter server"><span class="conn busy" id="link-dot"></span> <span class="ind-name">Splitter</span> <span id="link-label">connecting</span></span>
+    <span class="ind" title="the Splitter server's connection to VelociDrone"><span class="conn {% if game_connected %}on{% endif %}" id="game-dot"></span> <span class="ind-name">Game</span> <span id="game-label">{{ "connected" if game_connected else "offline" }}</span></span>
+  </span>
 </header>
 <main class="{% block main_class %}{% endblock %}">
 {% if request.query_params.get("notice") %}<div class="flash notice">{{ request.query_params.get("notice") }}</div>{% endif %}
@@ -43,18 +70,27 @@
   <a href="/healthz">health</a> · <a href="/protocol">protocol</a>
 </footer>
 <script>
-  // PWA: service worker (needs https or localhost; silently skipped otherwise),
-  // the install prompt (Android/desktop Chrome), and standalone-mode detection.
+  // PWA: service worker (needs https or localhost; silently skipped otherwise)
+  // and the install prompt (Android/desktop Chrome). Neither applies inside the
+  // native shell or an already-installed app: the webview fires
+  // beforeinstallprompt like any browser tab, so the button is gated on
+  // Splitter.env, re-checked when the display mode changes, and hidden for good
+  // once the app is installed.
   (function () {
-    if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
+    var env = window.Splitter.env;
+    if (!env.desktop && "serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
       navigator.serviceWorker.register("/sw.js?v=" + encodeURIComponent({{ app_version | tojson }})).catch(function () {});
     }
-    var standalone = window.matchMedia("(display-mode: standalone)").matches || window.matchMedia("(display-mode: fullscreen)").matches || window.navigator.standalone === true;
-    if (standalone) document.documentElement.classList.add("standalone");
     var btn = document.getElementById("btn-install"), deferred = null;
-    window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); deferred = e; if (btn && !standalone) btn.hidden = false; });
-    if (btn) btn.onclick = function () { if (!deferred) return; deferred.prompt(); deferred.userChoice.then(function () { deferred = null; btn.hidden = true; }); };
-    window.addEventListener("appinstalled", function () { if (btn) btn.hidden = true; });
+    if (!btn) return;
+    function paint() { btn.hidden = !(deferred && env.browserOnly()); }
+    window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); deferred = e; paint(); });
+    btn.onclick = function () { if (!deferred) return; deferred.prompt(); deferred.userChoice.then(function () { deferred = null; paint(); }); };
+    window.addEventListener("appinstalled", function () { deferred = null; paint(); });
+    ["standalone", "fullscreen", "minimal-ui"].forEach(function (m) {
+      var q = window.matchMedia("(display-mode: " + m + ")");
+      if (q.addEventListener) q.addEventListener("change", paint); else if (q.addListener) q.addListener(paint);
+    });
   })();
   function localizeTimes(root) {
     var fmt = new Intl.DateTimeFormat(undefined, {dateStyle: "medium", timeStyle: "short"});
@@ -65,6 +101,7 @@
   }
   localizeTimes();
 </script>
+<script src="/static/link.js?v={{ app_version }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>
