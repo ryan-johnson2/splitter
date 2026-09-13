@@ -21,10 +21,14 @@ from splitter.util import utcnow
 log = logging.getLogger(__name__)
 
 PING_INTERVAL = 5.0  # the game drops idle connections after 40 s
+# Reconnect pacing. The game's port is closed whenever the game is not running,
+# so a failed attempt is cheap; keep retrying often enough that launching the
+# game is noticed within seconds, not a minute (seen 2026-09-13: after hours
+# offline the old once-a-minute slow mode made the LXC look stuck).
 INITIAL_BACKOFF = 1.0
-MAX_BACKOFF = 30.0
-SLOW_AFTER_ATTEMPTS = 30  # then retry once a minute instead of hammering
-SLOW_BACKOFF = 60.0
+MAX_BACKOFF = 10.0
+SLOW_AFTER_ATTEMPTS = 60  # after ~10 min offline, ease off a little
+SLOW_BACKOFF = 15.0
 
 
 class BridgeState(StrEnum):
