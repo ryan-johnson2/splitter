@@ -17,13 +17,14 @@
   }
 
   // ── rendering ─────────────────────────────────────────────────
+  function goHold() { return !!(state.goUntil && Date.now() < state.goUntil); }
+
   function setPhase(phase) {
     state.phase = phase;
     var pill = $("phase");
     var map = { idle: ["dim", "idle"], armed: ["warn", "starting"], countdown: ["warn", "countdown"], racing: ["ok", "racing"], finished: ["accent", "finished"], aborted: ["bad", "aborted"], offline: ["bad", "game offline"] };
     var m = map[phase] || ["dim", phase];
     pill.className = "pill " + m[0]; pill.textContent = m[1];
-    $("view-countdown").hidden = phase !== "countdown";
     // #3: in focus mode the race card owns the screen while a run is in progress.
     document.documentElement.classList.toggle("racing", phase === "racing" || phase === "countdown");
   }
@@ -61,7 +62,8 @@
   }
 
   function resetRaceView() {
-    $("race-time").textContent = "0.000"; $("lap-time").textContent = "0.000"; paintPace(null);
+    if (!goHold()) { $("race-time").textContent = "0.000"; $("race-time").classList.remove("counting"); }
+    $("lap-time").textContent = "0.000"; paintPace(null);
     $("split").innerHTML = "&nbsp;"; $("split").className = "big-delta";
     $("lap-no").textContent = "HS"; $("gate-no").textContent = "–"; $("last-gate").textContent = "–";
     $("last-lap").textContent = "–"; $("last-lap-delta").textContent = "–"; $("last-lap-delta").className = "";
@@ -108,7 +110,7 @@
       if (!state.race || state.race.finished) return;
       var elapsed = Date.now() - t0;
       var lapStart = state.race.lap_start_ms || 0;
-      $("race-time").textContent = fmt(elapsed);
+      if (!goHold()) $("race-time").textContent = fmt(elapsed);
       $("lap-time").textContent = fmt(Math.max(0, elapsed - lapStart));
     }, 47);
     state.clockT0 = t0;
@@ -118,7 +120,7 @@
   function startClockFrom(t0) { stopClock(); timer = setInterval(function () {
     if (!state.race || state.race.finished) return;
     var elapsed = Date.now() - t0; var lapStart = state.race.lap_start_ms || 0;
-    $("race-time").textContent = fmt(elapsed); $("lap-time").textContent = fmt(Math.max(0, elapsed - lapStart));
+    if (!goHold()) $("race-time").textContent = fmt(elapsed); $("lap-time").textContent = fmt(Math.max(0, elapsed - lapStart));
   }, 47); }
 
   function renderResult(r) {
@@ -158,7 +160,17 @@
     reference: renderReference,
     player: function () {},
     armed: function (d) { renderSession(d.session); setPhase("armed"); resetRaceView(); $("gate-rows").innerHTML = ""; },
-    countdown: function (d) { $("countdown").textContent = d.count === 0 ? "GO" : d.count; setPhase(d.count === 0 ? "racing" : "countdown"); },
+    // The countdown lives in the main clock so nothing else on the page moves:
+    // 3, 2, 1 in the clock's place, GO, then the clock starts from 0.000.
+    countdown: function (d) {
+      var el = $("race-time");
+      if (d.count === 0) {
+        // GO holds the clock for a moment (state.goUntil); the reset from race_started
+        // and the clock ticks leave it alone until then.
+        el.textContent = "GO"; el.classList.add("counting"); state.goUntil = Date.now() + 700; setPhase("racing");
+        setTimeout(function () { state.goUntil = 0; el.classList.remove("counting"); if (!state.race) el.textContent = "0.000"; }, 700);
+      } else { resetRaceView(); el.textContent = String(d.count); el.classList.add("counting"); setPhase("countdown"); }
+    },
     race_started: function (d) { renderSession(d.session); renderReference(d.reference); state.race = { id: d.id, crossings: [], laps: [], total_ms: 0, lap_start_ms: 0, finished: false }; resetRaceView(); setPhase("racing"); startClock(state.race); },
     crossing: function (c) {
       if (!state.race) { state.race = { id: 0, crossings: [], laps: [], total_ms: 0, lap_start_ms: 0, finished: false }; setPhase("racing"); }

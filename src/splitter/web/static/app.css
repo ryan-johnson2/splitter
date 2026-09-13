@@ -163,7 +163,7 @@ html.focus.racing #race-card { min-height:calc(100vh - 8rem); display:flex; flex
 .state-banner .session { color:var(--fg2); }
 .state-banner .session b { color:var(--fg); }
 .state-banner .actions { margin-left:auto; display:flex; gap:.4rem; }
-.countdown { font-size:clamp(4rem, 20vw, 10rem); font-weight:800; text-align:center; color:var(--warn); line-height:1; }
+.big-time.counting { color:var(--warn); }
 .gate-log { max-height:60vh; overflow:auto; }
 .gate-log table td { padding:.4rem .5rem; }
 .gate-log tr.lap-end td { border-bottom:2px solid var(--line-strong); }
