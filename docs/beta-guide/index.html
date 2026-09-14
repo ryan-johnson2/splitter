@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Splitter beta — quick start (Windows)</title>
+<style>
+  @page { size: Letter; margin: 0.7in 0.75in; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { font: 11pt/1.45 "Segoe UI", Inter, Helvetica, Arial, sans-serif; color: #1a202c; margin: 0; }
+  h1 { font-size: 24pt; margin: 0 0 .1em; letter-spacing: -.01em; }
+  h2 { break-after: avoid; font-size: 15pt; margin: 1.3em 0 .4em; padding-bottom: .15em; border-bottom: 2px solid #10b981; color: #0f172a; }
+  h3 { break-after: avoid; font-size: 11.5pt; margin: 1em 0 .3em; }
+  p { margin: .35em 0 .6em; }
+  .sub { color: #475569; font-size: 11.5pt; margin: 0 0 1em; }
+  .tag { display: inline-block; background: #10b981; color: #fff; font-weight: 600; font-size: 9pt; padding: .15em .6em; border-radius: 999px; vertical-align: middle; margin-left: .5em; }
+  ol.steps { padding-left: 1.4em; margin: .4em 0 .8em; }
+  ol.steps > li { margin: .45em 0; padding-left: .2em; }
+  ol.steps > li::marker { font-weight: 700; color: #059669; }
+  ul { margin: .3em 0 .6em; padding-left: 1.3em; }
+  li { margin: .2em 0; }
+  kbd, code { font: 10pt "Cascadia Code", Consolas, "Courier New", monospace; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 4px; padding: 0 .3em; white-space: nowrap; }
+  .ui { font-weight: 600; color: #0f172a; }
+  .note { border-left: 4px solid #f59e0b; background: #fffbeb; padding: .5em .8em; margin: .6em 0; border-radius: 0 6px 6px 0; }
+  .tip { border-left: 4px solid #10b981; background: #ecfdf5; padding: .5em .8em; margin: .6em 0; border-radius: 0 6px 6px 0; }
+  .shot { margin: .5em 0 .9em; break-inside: avoid; }
+  .shot img { width: 100%; max-height: 4.6in; object-fit: cover; object-position: top; border: 1px solid #cbd5e1; border-radius: 6px; display: block; }
+  .shot figcaption { font-size: 9.5pt; color: #475569; margin-top: .3em; }
+  .placeholder { border: 2px dashed #94a3b8; border-radius: 8px; padding: 1.4em 1em; text-align: center; color: #64748b; font-size: 10pt; background: #f8fafc; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 1em; }
+  table { break-inside: avoid; border-collapse: collapse; width: 100%; font-size: 10.5pt; margin: .4em 0 .8em; }
+  th, td { text-align: left; padding: .35em .5em; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  .pagebreak { break-before: page; }
+  .foot { margin-top: 2em; font-size: 9pt; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: .5em; }
+</style>
+</head>
+<body>
+
+<h1>Splitter <span class="tag">beta</span></h1>
+<p class="sub">A lap timer for VelociDrone that watches you fly. Gate-by-gate splits against your personal best while you race, every run saved, and afterwards a clear picture of which parts of the track cost you time and where you crash. Windows quick start, about 10 minutes.</p>
+
+<h2>1. Start Splitter</h2>
+<ol class="steps">
+  <li><span class="ui">Make a folder</span> for it, for example <code>Documents\Splitter</code>, and put <code>splitter-windows-x64.exe</code> inside. Splitter keeps all your runs in a <code>splitter-data</code> folder that appears next to the exe, so keep the two together.</li>
+  <li><span class="ui">Double-click the exe.</span> The first launch takes a few seconds while it unpacks.</li>
+  <li>If Windows shows <span class="ui">“Windows protected your PC”</span>, click <span class="ui">More info</span>, then <span class="ui">Run anyway</span>. The beta is not code-signed yet, which is all that warning means.</li>
+  <li>If the <span class="ui">Windows Firewall</span> asks, click <span class="ui">Allow access</span>. That only matters if you want to watch the timer on a phone or tablet (section 6); Cancel is fine otherwise.</li>
+</ol>
+<p>A Splitter window opens on the <span class="ui">Live</span> page. Closing that window stops the timer.</p>
+
+<h2>2. Turn on the game's data feed (once)</h2>
+<p>VelociDrone can send race and telemetry data to tools like Splitter, but it is off by default.</p>
+<ol class="steps">
+  <li>In VelociDrone open <span class="ui">Options → Main Settings</span>.</li>
+  <li>Set <span class="ui">Websocket Communication</span> to <span class="ui">Yes</span>.</li>
+  <li>Set <span class="ui">Websocket IMU</span> to <span class="ui">Yes</span> as well. This adds speed, position and crash data. It only works when your quad uses the <span class="ui">Betaflight</span> flight controller model.</li>
+  <li><span class="ui">Restart VelociDrone.</span> The game reads these settings when it starts, so the change does nothing until you do.</li>
+</ol>
+<div class="two">
+  <div class="placeholder">Screenshot: Options → Main Settings with<br><b>Websocket Communication = Yes</b></div>
+  <div class="placeholder">Screenshot: <b>Websocket IMU = Yes</b><br>and the Betaflight flight controller setting</div>
+</div>
+
+<h2 class="pagebreak">3. Point Splitter at the game</h2>
+<p>The game only listens on your PC's network address, never on “localhost”, so Splitter needs to know that address even though both run on the same machine.</p>
+<ol class="steps">
+  <li><span class="ui">Find your PC's address:</span> press <kbd>Win</kbd> + <kbd>R</kbd>, type <code>cmd</code>, press Enter, then type <code>ipconfig</code> and press Enter. Look for <span class="ui">IPv4 Address</span> under your Wi-Fi or Ethernet adapter. It looks like <code>192.168.1.23</code>.</li>
+  <li>In Splitter open the <span class="ui">Settings</span> page (top menu).</li>
+  <li>Type that address into <span class="ui">Game PC address</span>. Leave <span class="ui">Port</span> at <code>60003</code>.</li>
+  <li>Put your VelociDrone pilot name in <span class="ui">Your player name</span>. It is only used to pick you out when other pilots are in a room, but set it now so it is there.</li>
+  <li>Click <span class="ui">Save</span>.</li>
+</ol>
+<figure class="shot">
+  <img src="guide-settings.png" alt="The Settings page">
+  <figcaption>The Settings page. Only the top three fields matter for the beta.</figcaption>
+</figure>
+<p>With VelociDrone running and the feed turned on, the top-right corner of every Splitter page shows <span class="ui">Game connected</span> with a green dot. If it says <span class="ui">offline</span> or <span class="ui">reconnecting</span>, check that the game is running, that you restarted it after step 2, and that the address is right.</p>
+<div class="note"><b>Two dots in the corner.</b> <span class="ui">Splitter</span> is the page's own link to the timer, <span class="ui">Game</span> is the timer's link to VelociDrone. Both should be green while you fly.</div>
+
+<h2>4. Fly</h2>
+<ol class="steps">
+  <li>On the <span class="ui">Live</span> page tap <span class="ui">Track…</span> and search for the track you are about to fly, then pick it. The game never says which track you are on in single player, so this is how Splitter knows. It remembers your pick until you change it.</li>
+  <li>Start a race in the game as normal. Splitter shows the countdown, then the race clock.</li>
+  <li>The big clock is coloured by how you are doing against your personal best on that track: <span style="color:#10b981;font-weight:600">green</span> ahead, <span style="color:#f59e0b;font-weight:600">yellow</span> close, <span style="color:#ef4444;font-weight:600">red</span> behind. Each gate you pass adds a line to the gate log with the split.</li>
+  <li>When you finish, the result card shows your laps and whether it was a new personal best.</li>
+</ol>
+<figure class="shot">
+  <img src="live.png" alt="The Live page between runs">
+  <figcaption>The Live page between runs: the track picked, the last result below the clock, and the gate log on the right.</figcaption>
+</figure>
+<div class="tip"><b>Timer stuck?</b> If you quit the game mid-run, Splitter aborts the run by itself after about ten seconds. You can also tap the red <span class="ui">Abort</span> button next to the clock at any time, which ends the run in Splitter and in the game.</div>
+<div class="note"><b>Personal bests need a track.</b> A run flown without picking a track is still saved, but it cannot become a personal best, and the clock has nothing to compare against. You can fix the track later on the <span class="ui">Races</span> page.</div>
+
+<h2>5. Look at your flying afterwards</h2>
+<table>
+  <tr><th style="width:22%">Page</th><th>What it shows</th></tr>
+  <tr><td><span class="ui">Races</span></td><td>Every run. Open one for the lap times, a top-down flight path coloured by speed, a speed graph, and a <em>Sections</em> table that compares each part of the track with your personal best, lap by lap. Crashes are marked with a red ✕.</td></tr>
+  <tr><td><span class="ui">Tracks</span></td><td>One entry per track and quad. Your personal best, how your times have moved run over run, and the <em>Sections</em> table: for each part of the track, how much time is “on the table” compared with your best-ever lap through it, how consistent you are, your slowest speed, how often you crash there, and a verdict of <em>line</em> (the line has time in it), <em>mistakes</em> (you blow it up sometimes) or <em>solid</em>.</td></tr>
+  <tr><td><span class="ui">Settings</span></td><td>The game address, your name, and display options such as the time format.</td></tr>
+</table>
+<figure class="shot">
+  <img src="prod-track.png" alt="The Tracks page with a sections table">
+  <figcaption>The Tracks page for one track. Sections are suggested automatically from your flying; <span class="ui">Edit sections</span> lets you split, merge and name them.</figcaption>
+</figure>
+
+<h2>6. Optional: watch on a phone or tablet</h2>
+<p>While the Splitter window is open, any phone or tablet on the same Wi-Fi can open <code>http://YOUR-PC-ADDRESS:8100/</code> in its browser, using the address from step 3, for example <code>http://192.168.1.23:8100/</code>. The Live page has a fullscreen button that hides everything but the clock. This needs the firewall permission from step 1.</p>
+
+<h2>7. When something goes wrong</h2>
+<p>This is a beta, so please tell me about anything odd. The most useful report has three things:</p>
+<ul>
+  <li><b>What you did and what you expected</b>, in a sentence or two.</li>
+  <li><b>A screenshot</b> of the Splitter page, if it looks wrong.</li>
+  <li><b>The log file</b>: <code>splitter-data\splitter-desktop.log</code>, next to the exe.</li>
+</ul>
+<h3>Known limits in this beta</h3>
+<ul>
+  <li>The exe is not code-signed, so Windows warns on first run.</li>
+  <li>In single player you must pick the track yourself (step 4). Hosted multiplayer rooms report it automatically.</li>
+  <li>Speed, flight path and crash detection need <span class="ui">Websocket IMU</span> on and the Betaflight flight controller model.</li>
+  <li>Closing the Splitter window stops the timer. Runs already saved are kept in <code>splitter-data</code>.</li>
+</ul>
+
+<p class="foot">Splitter 0.4.0 beta · September 2026</p>
+</body>
+</html>
