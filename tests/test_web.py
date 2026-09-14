@@ -406,3 +406,19 @@ async def test_race_page_shows_sections_against_the_pb(client: AsyncClient) -> N
     assert "Gate crossings" in html and html.index("Gate crossings") > html.index(
         "<h2>Sections</h2>"
     )
+
+
+async def test_manual_abort_endpoint_ends_a_stuck_run(client: AsyncClient) -> None:
+    controller = client.app.state.controller  # type: ignore[attr-defined]
+    await controller.handle_event(h.session())
+    await controller.handle_event(h.status("start"))
+    await controller.handle_event(h.countdown(0))
+    await controller.handle_event(h.racedata(0, 1, 1.0, False))
+    await controller.handle_event(h.racedata(1, 2, 2.0, False))
+    r = await client.post("/api/race/abort", json={"in_game": True})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["aborted"] and body["race_id"] == 1 and body["in_game"] is False  # no game attached
+    assert (await client.get("/api/races/1")).json()["status"] == "aborted"
+    assert (await client.post("/api/race/abort")).json()["aborted"] is False
+    assert 'id="btn-abort"' in (await client.get("/")).text

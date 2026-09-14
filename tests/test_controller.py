@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 from sqlalchemy import select
@@ -347,3 +348,34 @@ async def test_crashes_are_detected_and_attributed(
         assert crash["speed_before"] == 20.0 and crash["decel"] <= -120
         gate = (await db.execute(select(GateTime).where(GateTime.seq == 3))).scalar_one()
         assert gate.min_speed == 2.0 and gate.min_accel is not None and gate.min_accel <= -120
+
+
+async def test_losing_the_game_mid_race_aborts_after_the_grace(
+    controller: RaceController, hub: LiveHub, session_factory
+) -> None:
+    await controller.handle_event(h.session())
+    await controller.handle_event(h.status("start"))
+    await controller.handle_event(h.countdown(0))
+    await controller.handle_event(h.racedata(0, 1, 1.0, False))
+    await controller.handle_event(h.racedata(1, 2, 2.0, False))
+    assert controller.race_active
+    controller.game_loss_grace_s = 0.01
+    q = hub.subscribe()
+    # A blip that comes back inside the grace keeps the run.
+    await controller.on_game_state(False)
+    await controller.on_game_state(True)
+    await asyncio.sleep(0.05)
+    assert controller.race_active
+    # A real loss ends it.
+    await controller.on_game_state(False)
+    await asyncio.sleep(0.05)
+    assert not controller.race_active
+    kinds = [m["type"] for m in h.drain(q)]
+    assert "race_finished" in kinds and "notice" in kinds
+    async with session_factory() as db:
+        race = (await db.execute(select(Race))).scalar_one()
+        assert race.status == "aborted"
+
+
+async def test_manual_abort_without_a_race_is_a_no_op(controller: RaceController) -> None:
+    assert await controller.abort_race("manual") is None

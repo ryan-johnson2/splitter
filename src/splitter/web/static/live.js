@@ -27,6 +27,7 @@
     pill.className = "pill " + m[0]; pill.textContent = m[1];
     // #3: in focus mode the race card owns the screen while a run is in progress.
     document.documentElement.classList.toggle("racing", phase === "racing" || phase === "countdown");
+    $("btn-abort").hidden = !(phase === "racing" || phase === "countdown" || phase === "armed");
   }
 
   // #2: colour the race clock by pace vs the PB at the last gate crossing.
@@ -262,6 +263,14 @@
     if (document.fullscreenElement || standalone) paintFsButtons(); else enterFullscreen();
   };
   document.addEventListener("fullscreenchange", function () { if (!document.fullscreenElement && !standalone) root.classList.remove("focus"); paintFsButtons(); });
+
+  $("btn-abort").onclick = function () {
+    if (!confirm("Abort this run? It is kept as aborted, and the game is told to abort too.")) return;
+    fetch("/api/race/abort", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ in_game: true }) })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.detail || "failed"); return j; }); })
+      .then(function (j) { toast(j.aborted ? (j.in_game ? "Aborted here and in the game" : "Aborted (game not connected)") : "No run to abort"); })
+      .catch(function (e) { toast(e.message, "bad"); });
+  };
 
   $("btn-reconnect").onclick = function () {
     fetch("/api/connection", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "connect" }) })

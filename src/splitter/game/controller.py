@@ -14,6 +14,7 @@ the first racedata after arming starts the race instead.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -51,6 +52,7 @@ from splitter.util import utcnow
 
 log = logging.getLogger(__name__)
 
+GAME_LOSS_GRACE_S = 10.0  # seconds without the game before a running race is aborted
 IMU_LOG_EVERY_S = 5.0  # how often an imu frame lands in the event log
 LIVE_TELEMETRY_HZ = 4.0  # live speed/position messages to the browser
 
@@ -109,6 +111,8 @@ class RaceController:
         self.tracker: RaceTracker | None = None
         self.reference: Reference | None = None
         self.telemetry = TelemetryBuffer()
+        self.game_loss_grace_s = GAME_LOSS_GRACE_S
+        self._loss_task: asyncio.Task[None] | None = None
         self.race_id: int | None = None
         self.race_started_at: datetime | None = None
         self.armed = False
@@ -242,6 +246,43 @@ class RaceController:
 
     def broadcast_status(self) -> None:
         self._hub.broadcast("status", self._status_provider())
+
+    async def abort_race(self, reason: str) -> int | None:
+        """End the current run as aborted (a stuck timer, or the pilot's say-so).
+
+        Returns the race id that was aborted, or None when nothing was running.
+        """
+        race_id = self.race_id
+        if race_id is None and not self.armed:
+            return None
+        log.info("aborting race %s: %s", race_id, reason)
+        await self._finish_race(aborted=True)
+        self._hub.broadcast("notice", {"message": f"Race aborted: {reason}", "level": "warn"})
+        return race_id
+
+    async def on_game_state(self, connected: bool) -> None:
+        """Game link changed. A run cannot survive losing the game: after a short
+        grace (a blip may reconnect) the race is aborted instead of ticking forever."""
+        self.broadcast_status()
+        if connected:
+            if self._loss_task is not None:
+                self._loss_task.cancel()
+                self._loss_task = None
+            return
+        if self.race_id is None or self._loss_task is not None:
+            return
+        race_id = self.race_id
+
+        async def _abort_after_grace() -> None:
+            try:
+                await asyncio.sleep(self.game_loss_grace_s)
+            except asyncio.CancelledError:
+                return
+            self._loss_task = None
+            if self.race_id == race_id:
+                await self.abort_race("game connection lost")
+
+        self._loss_task = asyncio.create_task(_abort_after_grace())
 
     # ── event entry point ────────────────────────────────────────────
 

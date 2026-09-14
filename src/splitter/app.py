@@ -88,8 +88,8 @@ def create_app(config: Config | None = None) -> FastAPI:
         controller.load_sticky_session()
         await controller.refresh_reference()
 
-        async def on_state(_b: GameBridge) -> None:
-            controller.broadcast_status()
+        async def on_state(b: GameBridge) -> None:
+            await controller.on_game_state(b.connected)
 
         bridge = GameBridge(on_event=controller.handle_event, on_state=on_state)
         if settings.get_bool("auto_connect") and settings.get("game_host"):

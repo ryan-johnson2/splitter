@@ -90,6 +90,18 @@ class GameBridge:
     def enabled(self) -> bool:
         return self._enabled
 
+    async def abort_race(self) -> bool:
+        """Send the game's ``abortrace`` command; False when not connected."""
+        client = self._client
+        if client is None:
+            return False
+        try:
+            await client.abort_race()
+        except Exception as exc:
+            log.warning("abortrace command failed: %s", exc)
+            return False
+        return True
+
     def status(self) -> dict[str, object]:
         return {
             "state": self.state.value,

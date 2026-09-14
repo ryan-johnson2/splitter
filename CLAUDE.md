@@ -58,6 +58,13 @@ racestatus:"race finished" / "abort"
 
 - If the single-player countdown is off there are no countdown frames: the
   first racedata after arming starts the race.
+- **A run cannot outlive the game link.** Closing the game mid-run sends no
+  abort, so the controller aborts the race itself when the bridge has been
+  disconnected for `GAME_LOSS_GRACE_S` (10 s; a blip that reconnects sooner
+  keeps the run). The live page has an **Abort** button while a run is on:
+  `POST /api/race/abort` ends it here and, when connected, sends the game's
+  `abortrace` command (works in single player). Startup still marks any race
+  left `running` as aborted.
 - An abort with zero crossings deletes the row; with crossings it is kept as
   `aborted`. A `start` while a race is running aborts the old one first.
 - **Single player never names the track.** `session` (track, scenery, quad,

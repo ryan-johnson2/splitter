@@ -108,6 +108,22 @@ async def connection(request: Request, body: ConnectionIn) -> dict[str, Any]:
     return dict(bridge.status())
 
 
+class AbortIn(BaseModel):
+    in_game: bool = True  # also send the game's abortrace command when connected
+
+
+@router.post("/race/abort")
+async def race_abort(request: Request, body: AbortIn | None = None) -> dict[str, Any]:
+    """Manual abort: the timer got stuck (game closed mid-run) or the pilot gives up."""
+    controller = request.app.state.controller
+    bridge = request.app.state.bridge
+    sent = False
+    if (body is None or body.in_game) and controller.race_active:
+        sent = await bridge.abort_race()
+    race_id = await controller.abort_race("manual")
+    return {"aborted": race_id is not None, "race_id": race_id, "in_game": sent}
+
+
 @router.get("/races")
 async def races(request: Request, track: str = "", quad: str = "", limit: int = 100) -> list[Any]:
     async with request.app.state.session_factory() as db:
