@@ -2,8 +2,8 @@
 
 `index.html` is the source of `Splitter-beta-quick-start.pdf`, the sheet handed to
 Windows beta testers with `splitter-windows-x64.exe`. Screenshots sit beside it.
-The two dashed placeholders in section 2 are for in-game screenshots of
-*Options → Main Settings* (Websocket Communication / Websocket IMU).
+`game-settings.png` is the in-game *Options → Main Settings* screen; its callouts are CSS overlays
+in `index.html` (percent positions), so a new screenshot needs the boxes nudged.
 
 Regenerate the PDF with headless Chromium (no local install needed):
 

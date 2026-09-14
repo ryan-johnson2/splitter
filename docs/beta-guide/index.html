@@ -26,6 +26,10 @@
   .shot img { width: 100%; max-height: 4.6in; object-fit: cover; object-position: top; border: 1px solid #cbd5e1; border-radius: 6px; display: block; }
   .shot figcaption { font-size: 9.5pt; color: #475569; margin-top: .3em; }
   .placeholder { border: 2px dashed #94a3b8; border-radius: 8px; padding: 1.4em 1em; text-align: center; color: #64748b; font-size: 10pt; background: #f8fafc; }
+  .annotated .frame { position: relative; }
+  .annotated img { max-height: none; }
+  .annotated .callout { position: absolute; border: 3px solid #ef4444; border-radius: 6px; box-shadow: 0 0 0 2px rgba(255,255,255,.6); }
+  .annotated .badge { position: absolute; width: 1.5em; height: 1.5em; line-height: 1.5em; text-align: center; background: #ef4444; color: #fff; font-weight: 700; font-size: 11pt; border-radius: 50%; transform: translate(-50%, 0); }
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: 1em; }
   table { break-inside: avoid; border-collapse: collapse; width: 100%; font-size: 10.5pt; margin: .4em 0 .8em; }
   th, td { text-align: left; padding: .35em .5em; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
@@ -53,15 +57,20 @@
 <ol class="steps">
   <li>In VelociDrone open <span class="ui">Options → Main Settings</span>.</li>
   <li>Set <span class="ui">Websocket Communication</span> to <span class="ui">Yes</span>.</li>
-  <li>Set <span class="ui">Websocket IMU</span> to <span class="ui">Yes</span> as well. This adds speed, position and crash data. It only works when your quad uses the <span class="ui">Betaflight</span> flight controller model.</li>
+  <li>Set <span class="ui">Websocket IMU Data</span> to <span class="ui">Yes</span> as well. Both rows are at the bottom of the list. This adds speed, position and crash data. It only works when your quad uses the <span class="ui">Betaflight</span> flight controller model.</li>
   <li><span class="ui">Restart VelociDrone.</span> The game reads these settings when it starts, so the change does nothing until you do.</li>
 </ol>
-<div class="two">
-  <div class="placeholder">Screenshot: Options → Main Settings with<br><b>Websocket Communication = Yes</b></div>
-  <div class="placeholder">Screenshot: <b>Websocket IMU = Yes</b><br>and the Betaflight flight controller setting</div>
-</div>
+<figure class="shot annotated">
+  <div class="frame">
+    <img src="game-settings.png" alt="VelociDrone Options → Main Settings with both websocket rows set to Yes">
+    <span class="callout" style="left:1.2%; top:1.5%; width:33%; height:10.5%"></span><span class="badge" style="left:35.5%; top:2%">1</span>
+    <span class="callout" style="left:36%; top:79.5%; width:58.5%; height:9.5%"></span><span class="badge" style="left:95.5%; top:80.5%">2</span>
+    <span class="callout" style="left:36%; top:89.3%; width:58.5%; height:9.5%"></span><span class="badge" style="left:95.5%; top:90.3%">3</span>
+  </div>
+  <figcaption><b>1</b> Options → Main Settings. Scroll to the bottom of the list. <b>2</b> Websocket Communication → Yes. <b>3</b> Websocket IMU Data → Yes.</figcaption>
+</figure>
 
-<h2 class="pagebreak">3. Point Splitter at the game</h2>
+<h2>3. Point Splitter at the game</h2>
 <p>The game only listens on your PC's network address, never on “localhost”, so Splitter needs to know that address even though both run on the same machine.</p>
 <ol class="steps">
   <li><span class="ui">Find your PC's address:</span> press <kbd>Win</kbd> + <kbd>R</kbd>, type <code>cmd</code>, press Enter, then type <code>ipconfig</code> and press Enter. Look for <span class="ui">IPv4 Address</span> under your Wi-Fi or Ethernet adapter. It looks like <code>192.168.1.23</code>.</li>
@@ -117,7 +126,7 @@
 <ul>
   <li>The exe is not code-signed, so Windows warns on first run.</li>
   <li>In single player you must pick the track yourself (step 4). Hosted multiplayer rooms report it automatically.</li>
-  <li>Speed, flight path and crash detection need <span class="ui">Websocket IMU</span> on and the Betaflight flight controller model.</li>
+  <li>Speed, flight path and crash detection need <span class="ui">Websocket IMU Data</span> on and the Betaflight flight controller model.</li>
   <li>Closing the Splitter window stops the timer. Runs already saved are kept in <code>splitter-data</code>.</li>
 </ul>
 
