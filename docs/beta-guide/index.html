@@ -48,6 +48,7 @@
   <li><span class="ui">Make a folder</span> for it, for example <code>Documents\Splitter</code>, and put <code>splitter-windows-x64.exe</code> inside. Splitter keeps all your runs in a <code>splitter-data</code> folder that appears next to the exe, so keep the two together.</li>
   <li><span class="ui">Double-click the exe.</span> The first launch takes a few seconds while it unpacks.</li>
   <li>If Windows shows <span class="ui">“Windows protected your PC”</span>, click <span class="ui">More info</span>, then <span class="ui">Run anyway</span>. The beta is not code-signed yet, which is all that warning means.</li>
+  <li>Because it is not signed, <span class="ui">Microsoft Defender</span> may also flag or remove the exe when you copy or download it. If it does, open <span class="ui">Windows Security → Virus &amp; threat protection → Protection history</span>, find the Splitter entry, choose <span class="ui">Actions → Allow</span>, then <span class="ui">copy the exe into the folder again</span>. It should stay put after that.</li>
   <li>If the <span class="ui">Windows Firewall</span> asks, click <span class="ui">Allow access</span>. That only matters if you want to watch the timer on a phone or tablet (section 6); Cancel is fine otherwise.</li>
 </ol>
 <p>A Splitter window opens on the <span class="ui">Live</span> page. Closing that window stops the timer.</p>
@@ -124,7 +125,7 @@
 </ul>
 <h3>Known limits in this beta</h3>
 <ul>
-  <li>The exe is not code-signed, so Windows warns on first run.</li>
+  <li>The exe is not code-signed, so Windows warns on first run and Defender may flag it (section 1).</li>
   <li>In single player you must pick the track yourself (step 4). Hosted multiplayer rooms report it automatically.</li>
   <li>Speed, flight path and crash detection need <span class="ui">Websocket IMU Data</span> on and the Betaflight flight controller model.</li>
   <li>Closing the Splitter window stops the timer. Runs already saved are kept in <code>splitter-data</code>.</li>
