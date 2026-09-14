@@ -6,7 +6,7 @@
   <span class="pill dim" id="phase">idle</span>
   <span class="session" id="session-line">—</span>
   <span class="actions">
-    <button type="button" class="btn sm" id="btn-session">Track…</button>
+    <button type="button" class="btn sm" id="btn-session">Track…</button><button type="button" class="btn sm help-btn" data-help="track" title="what is this?">?</button>
     <button type="button" class="btn sm" id="btn-reconnect" title="reconnect to the game">↻</button>
     <button type="button" class="btn sm danger" id="btn-abort" hidden title="abort this run here and in the game">Abort</button>
     <button type="button" class="btn sm" id="btn-fullscreen" title="fullscreen, menus visible">⛶</button>
@@ -14,6 +14,15 @@
   </span>
 </div>
 
+
+<div class="card" id="getting-started" hidden>
+  <div class="card-head"><h2>Getting started</h2><span class="muted small">three things before the first run</span></div>
+  <ol class="checklist">
+    <li id="gs-host"><span class="mark"></span><div><b>Tell Splitter where the game is.</b> <span class="todo">Open <a href="/settings">Settings</a> and enter the game PC's address{% if desktop %} — it is pre-filled with this PC's address; if the game never connects, try another one from the list there{% endif %}.</span><span class="done">Game address set.</span></div></li>
+    <li id="gs-game"><span class="mark"></span><div><b>Turn on the game's data feed.</b> <span class="todo">In VelociDrone: <i>Options → Main Settings</i>, set <i>Websocket Communication</i> and <i>Websocket IMU Data</i> to Yes, then <b>restart the game</b>.</span><span class="done">Game connected.</span></div></li>
+    <li id="gs-track"><span class="mark"></span><div><b>Pick the track.</b> <span class="todo">Tap <b>Track…</b> above and choose the track you are flying. Single player never says which, and personal bests need it.</span><span class="done">Track set.</span></div></li>
+  </ol>
+</div>
 
 <div class="live-grid">
   <div>
@@ -85,7 +94,7 @@
 <div class="toast-wrap" id="toasts"></div>
 {% endblock %}
 {% block scripts %}
-<script>window.SPLITTER_SNAPSHOT = {{ snapshot | tojson }};</script>
+<script>window.SPLITTER_SNAPSHOT = {{ snapshot | tojson }}; window.SPLITTER_GAME_HOST_SET = {{ game_host_set | tojson }};</script>
 <script src="/static/picker.js?v={{ app_version }}"></script>
 <script src="/static/live.js?v={{ app_version }}"></script>
 {% endblock %}

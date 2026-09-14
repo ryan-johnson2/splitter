@@ -39,6 +39,11 @@
     </table>
     </div>
   </div>
+  {% if analysis.trends and finished_count > 1 %}
+  <div class="card-head" style="margin-top:1rem"><h2 class="small">Section trends</h2><span class="muted small">time lost to your best-ever lap in each section, per run · tap a name to isolate it</span></div>
+  <svg id="trend-chart" class="chart" viewBox="0 0 800 260"></svg>
+  <div class="legend" id="trend-legend"></div>
+  {% endif %}
   <p class="help"><b>On the table</b> is the PB run's time in the section minus your best-ever lap through it. <b>line</b>: the PB is consistently slower there than your best, so the line has time in it. <b>mistakes</b>: a real share of laps blow up there. <b>solid</b>: little to gain.{% if analysis.holeshot_crashes %} Plus {{ analysis.holeshot_crashes }} crash{{ "es" if analysis.holeshot_crashes != 1 }} before the first gate.{% endif %}</p>
   <div id="section-editor" hidden>
     <p class="help">Tap a gate to start a new section there; tap a section's first gate to merge it into the one before. Name them, then save.</p>
@@ -170,6 +175,33 @@
       });
     };
     drawMap();
+  }
+
+  // Section trends: one line per section, y = mean per-lap time minus the section's best-ever.
+  var tc = $("trend-chart"), TR = {{ analysis.trends | tojson }};
+  if (tc && TR.length) {
+    var runs = []; TR.forEach(function (t) { t.points.forEach(function (p) { if (runs.indexOf(p[0]) < 0) runs.push(p[0]); }); }); runs.sort(function (a, b) { return a - b; });
+    var TW = 800, TH = 260, TL = 46, TRt = 12, TT = 12, TB = 26, only = null;
+    var vMax = 0; TR.forEach(function (t) { t.points.forEach(function (p) { vMax = Math.max(vMax, p[1] - t.best); }); }); vMax = Math.max(500, Math.ceil(vMax / 500) * 500);
+    var tx = function (i) { return TL + (runs.length > 1 ? i / (runs.length - 1) : 0.5) * (TW - TL - TRt); }, ty = function (v) { return TT + (1 - v / vMax) * (TH - TT - TB); };
+    function drawTrend() {
+      while (tc.firstChild) tc.removeChild(tc.firstChild);
+      for (var k = 0; k <= 4; k++) { var v = vMax * k / 4; el("line", { x1: TL, x2: TW - TRt, y1: ty(v), y2: ty(v), class: "grid" }, tc); var lb = el("text", { x: TL - 6, y: ty(v) + 4, class: "label", "text-anchor": "end" }, tc); lb.textContent = "+" + (v / 1000).toFixed(1); }
+      TR.forEach(function (t, i) {
+        if (only !== null && only !== i) return;
+        var d = t.points.map(function (p, j) { return (j ? "L" : "M") + tx(runs.indexOf(p[0])).toFixed(1) + " " + ty(Math.max(0, p[1] - t.best)).toFixed(1); }).join(" ");
+        el("path", { d: d, class: "series sec-" + (i % 8), "stroke-opacity": only === null ? .85 : 1 }, tc);
+        t.points.forEach(function (p) { var c = el("circle", { cx: tx(runs.indexOf(p[0])), cy: ty(Math.max(0, p[1] - t.best)), r: 3, class: "gate sec-" + (i % 8) }, tc); var tt = el("title", {}, c); tt.textContent = t.name + " · run #" + p[0] + " · +" + ((p[1] - t.best) / 1000).toFixed(3) + " s"; c.style.cursor = "pointer"; c.addEventListener("click", function () { location.href = "/races/" + p[0]; }); });
+      });
+      var f = el("text", { x: TL, y: TH - 8, class: "label" }, tc); f.textContent = "first"; var l = el("text", { x: TW - TRt, y: TH - 8, class: "label", "text-anchor": "end" }, tc); l.textContent = "latest";
+    }
+    var legend = $("trend-legend");
+    TR.forEach(function (t, i) {
+      var b = document.createElement("button"); b.type = "button"; b.className = "btn sm legend-item"; b.innerHTML = '<span class="sec-swatch sec-' + (i % 8) + '"></span>' + t.name;
+      b.onclick = function () { only = only === i ? null : i; legend.querySelectorAll(".legend-item").forEach(function (x, j) { x.classList.toggle("primary", only === j); }); drawTrend(); };
+      legend.appendChild(b);
+    });
+    drawTrend();
   }
 
   // Editor: tap a gate to split there, tap a section's first gate to merge it back.

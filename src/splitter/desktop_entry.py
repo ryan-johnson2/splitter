@@ -101,6 +101,7 @@ def main(argv: list[str] | None = None) -> None:
         Path(args.data_dir).mkdir(parents=True, exist_ok=True)
         os.environ["SPLITTER_DATA_DIR"] = args.data_dir
     os.environ.setdefault("HOST", args.host)
+    os.environ["SPLITTER_DESKTOP"] = "1"  # same PC as the game: pre-fill its LAN address
     port = _free_port(args.host, args.port) if args.port else _free_port(args.host, 0)
     os.environ["PORT"] = str(port)
 

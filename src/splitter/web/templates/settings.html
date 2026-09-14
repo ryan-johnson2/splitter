@@ -11,6 +11,8 @@
     <div class="field"><label for="game_host">Game PC address</label><input id="game_host" name="game_host" value="{{ values.game_host }}" placeholder="192.168.1.50"></div>
     <div class="field"><label for="game_port">Port</label><input id="game_port" name="game_port" type="number" value="{{ values.game_port }}" min="1" max="65535"></div>
   </div>
+  {% if local_addresses %}<p class="help chips">This PC's addresses — the game listens on one of them, usually the first:
+    {% for ip in local_addresses %}<button type="button" class="btn sm" onclick="document.getElementById('game_host').value='{{ ip }}'">{{ ip }}</button>{% endfor %}</p>{% endif %}
   <div class="field"><label for="player_name">Your player name</label><input id="player_name" name="player_name" value="{{ values.player_name }}" placeholder="learned automatically when alone in the race"><p class="help">Only needed when other pilots are in the room, so Splitter knows which entry is you.</p></div>
   <div class="field"><label class="switch"><input type="hidden" name="auto_connect" value="0"><input type="checkbox" name="auto_connect" value="1" {% if values.auto_connect == "1" %}checked{% endif %}> Connect automatically at startup</label></div>
   <p class="small">Status: <span class="pill {{ 'ok' if bridge.connected else 'warn' if bridge.state in ('connecting', 'reconnecting') else 'dim' }}">{{ bridge.state }}</span>

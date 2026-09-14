@@ -138,13 +138,18 @@
     el("line", { x1: px(T[i - 1]), y1: py(T[i - 1]), x2: px(T[i]), y2: py(T[i]), stroke: speedColor(T[i][4], maxSpeed), "stroke-width": 2.5, "stroke-linecap": "round" }, svg);
   }
   if (T.length) { el("circle", { cx: px(T[0]), cy: py(T[0]), r: 5, fill: "#f7f9fb" }, svg); }
-  // Gate markers at the sample nearest each crossing time.
+  // Gate markers at the sample nearest each crossing time. Labels only once per
+  // gate (laps overlap), and on a long track only every 5th gate plus the start.
+  var gates = {}; G.forEach(function (g) { gates[g[2]] = 1; });
+  var nGates = Object.keys(gates).length, every = nGates > 16 ? 5 : nGates > 8 ? 2 : 1, labelled = {};
   G.forEach(function (g) {
     var best = null, bd = Infinity;
     T.forEach(function (s) { var d = Math.abs(s[0] - g[0]); if (d < bd) { bd = d; best = s; } });
     if (!best || bd > 400) return;
     el("circle", { cx: px(best), cy: py(best), r: 4, class: "gate" }, svg);
-    var t = el("text", { x: px(best) + 6, y: py(best) - 6, class: "label" }, svg); t.textContent = "L" + g[1] + "G" + g[2];
+    if (labelled[g[2]] || (g[2] > 2 && (g[2] - 2) % every !== 0)) return;
+    labelled[g[2]] = 1;
+    var t = el("text", { x: px(best) + 6, y: py(best) - 6, class: "label" }, svg); t.textContent = "G" + g[2];
   });
   X.forEach(function (c) {
     var p = [c[0], c[1], c[2], c[3]], cx = px(p), cy = py(p), r = 6;

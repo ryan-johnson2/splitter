@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
+from splitter.core import netinfo
 from splitter.core.timeparse import TIME_FORMATS
 from splitter.web.templating import redirect_with_flash, templates
 
@@ -21,6 +22,7 @@ async def settings_page(request: Request) -> Any:
         "settings.html",
         {
             "values": state.settings.all(),
+            "local_addresses": netinfo.local_ipv4_addresses() if state.config.desktop else [],
             "time_formats": TIME_FORMATS,
             "bridge": state.bridge.status(),
             "controller": state.controller,

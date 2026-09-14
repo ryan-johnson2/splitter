@@ -25,9 +25,11 @@ class Config(BaseSettings):
     data_dir: str = ""  # DATA_DIR; SPLITTER_DATA_DIR (the desktop app) takes precedence
     host: str = "0.0.0.0"
     port: int = 8100
+    desktop: bool = False  # SPLITTER_DESKTOP=1: the portable app on the gaming PC itself
 
     def model_post_init(self, _ctx: object) -> None:
         self.data_dir = os.environ.get("SPLITTER_DATA_DIR", "") or self.data_dir
+        self.desktop = self.desktop or os.environ.get("SPLITTER_DESKTOP", "") == "1"
         if not self.database_url:
             base = Path(self.data_dir).expanduser() if self.data_dir else Path("./data")
             self.database_url = f"sqlite+aiosqlite:///{base / 'splitter.db'}"

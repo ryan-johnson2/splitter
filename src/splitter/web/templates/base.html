@@ -13,7 +13,7 @@
   <link rel="apple-touch-icon" href="/static/icon-256.png">
   <title>{% block title %}{{ brand_name }}{% endblock %}</title>
   <link rel="stylesheet" href="/static/app.css?v={{ app_version }}">
-  <script>window.SPLITTER_TIME_FORMAT = {{ time_format | tojson }}; window.SPLITTER_PACE_YELLOW_S = {{ pace_yellow_s | tojson }};</script>
+  <script>window.SPLITTER_TIME_FORMAT = {{ time_format | tojson }}; window.SPLITTER_PACE_YELLOW_S = {{ pace_yellow_s | tojson }}; window.SPLITTER_GAME_ADDR = {{ game_addr | tojson }};</script>
   <script src="/static/fmt.js?v={{ app_version }}"></script>
   <script>
     // Where the page runs, before anything renders: "desktop" inside the native
@@ -54,8 +54,8 @@
     <a href="/settings" {% if path.startswith("/settings") %}class="active"{% endif %}>Settings</a>
   </nav>
   <span class="who">
-    <span class="ind" title="this page's live link to the Splitter server"><span class="conn busy" id="link-dot"></span> <span class="ind-name">Splitter</span> <span id="link-label">connecting</span></span>
-    <span class="ind" title="the Splitter server's connection to VelociDrone"><span class="conn {% if game_connected %}on{% endif %}" id="game-dot"></span> <span class="ind-name">Game</span> <span id="game-label">{{ "connected" if game_connected else "offline" }}</span></span>
+    <button type="button" class="ind" id="ind-link" data-help="link" title="this page's link to Splitter — tap for help"><span class="conn busy" id="link-dot"></span> <span class="ind-name">Splitter</span> <span id="link-label">connecting</span></button>
+    <button type="button" class="ind" id="ind-game" data-help="game" title="Splitter's connection to VelociDrone — tap for help"><span class="conn {% if game_connected %}on{% endif %}" id="game-dot"></span> <span class="ind-name">Game</span> <span id="game-label">{{ "connected" if game_connected else "offline" }}</span></button>
   </span>
 </header>
 <main class="{% block main_class %}{% endblock %}">

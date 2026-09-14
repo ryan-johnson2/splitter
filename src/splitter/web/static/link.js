@@ -51,6 +51,59 @@
   setInterval(function () { if (ws && ws.readyState === 1) ws.send("ping"); }, 20000);
   document.addEventListener("visibilitychange", function () { if (!document.hidden && ws && ws.readyState === 1) ws.send("snapshot"); });
 
+  // ── help popovers ─────────────────────────────────────────────
+  // Anything with data-help="<key>" opens a short "what to do" note on click
+  // (hover-only titles are useless on a tablet). Texts adapt to the live state.
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  var HELP = {
+    link: function () {
+      if (link.state === "live") return { title: "Splitter link: live", body: "This page is talking to Splitter. Nothing to do." };
+      return { title: "Splitter link: " + link.state, body: "This page cannot reach Splitter itself." +
+        "<ul><li>Desktop app: is the Splitter window still open? Closing it stops the timer.</li>" +
+        "<li>Phone or tablet: same Wi-Fi as the PC, and the address in the browser must be the PC's, e.g. <code>http://192.168.1.23:8100/</code>.</li>" +
+        "<li>It reconnects by itself; if the dot stays red, reload the page.</li></ul>" };
+    },
+    game: function () {
+      var g = link.game, addr = window.SPLITTER_GAME_ADDR || "";
+      if (g && g.connected) return { title: "Game: connected", body: "Splitter is receiving VelociDrone's feed. Fly." };
+      if (link.state !== "live") return { title: "Game: unknown", body: "This page has lost Splitter, so the game state is unknown. Fix the Splitter link first." };
+      var head = addr ? "Splitter is trying to reach VelociDrone at <code>" + esc(addr) + "</code>" : "No game address is set yet";
+      var err = g && g.last_error ? '<p class="muted small">Last error: ' + esc(g.last_error) + "</p>" : "";
+      return { title: "Game: " + ((g && g.state) || "offline"), body: head + ".<ul>" +
+        (addr ? "" : '<li>Open <a href="/settings">Settings</a> and enter the game PC\'s address.</li>') +
+        "<li>Is VelociDrone running?</li>" +
+        "<li>In the game: <i>Options → Main Settings</i>, set <i>Websocket Communication</i> and <i>Websocket IMU Data</i> to Yes, then <b>restart the game</b> — it only reads them at startup.</li>" +
+        "<li>The address must be the game PC's <b>LAN address</b>, never localhost, even when Splitter runs on the same PC. <a href=\"/settings\">Settings</a> lists this PC's addresses in the desktop app.</li>" +
+        "<li>Same network, and nothing blocking port 60003 between them.</li>" +
+        "<li>Only one tool can listen to the game at a time — close other overlays or timers.</li></ul>" + err };
+    },
+    track: function () { return { title: "Track…", body: "Single player never tells Splitter which track you are on, so pick it here before you fly. Splitter remembers it until you change it. Runs without a track are saved but cannot be personal bests." }; },
+    abort: function () { return { title: "Abort", body: "Ends the current run as aborted in Splitter and tells the game to abort too. Use it if the timer keeps running after you quit or crashed out of a race." }; },
+    noid: function () { return { title: "No online track id", body: "This run's track has no online id, so it cannot be a personal best and has no reference. Pick the track with <b>Track…</b>, or fix it later on the Races page." }; }
+  };
+  var pop = null;
+  function closeHelp() { if (pop) { pop.remove(); pop = null; } }
+  function openHelp(anchor, key) {
+    closeHelp();
+    var make = HELP[key]; if (!make) return;
+    var h = make();
+    pop = document.createElement("div"); pop.className = "popover"; pop.setAttribute("role", "dialog");
+    pop.innerHTML = '<div class="popover-head"><b>' + h.title + '</b><button type="button" class="popover-close" aria-label="close">×</button></div><div class="popover-body">' + h.body + "</div>";
+    document.body.appendChild(pop);
+    var r = anchor.getBoundingClientRect(), w = Math.min(360, window.innerWidth - 24);
+    pop.style.width = w + "px";
+    pop.style.left = Math.max(12, Math.min(r.left, window.innerWidth - w - 12)) + window.scrollX + "px";
+    pop.style.top = (r.bottom + 8 + window.scrollY) + "px";
+    pop.querySelector(".popover-close").onclick = closeHelp;
+  }
+  document.addEventListener("click", function (e) {
+    var t = e.target.closest ? e.target.closest("[data-help]") : null;
+    if (t) { e.preventDefault(); openHelp(t, t.getAttribute("data-help")); return; }
+    if (pop && !pop.contains(e.target)) closeHelp();
+  });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeHelp(); });
+  link.help = openHelp;
+
   link.on = function (type, fn) { (listeners[type] = listeners[type] || []).push(fn); return link; };
   link.send = function (text) { if (ws && ws.readyState === 1) ws.send(text); };
   link.connected = function () { return !!(game && game.connected); };

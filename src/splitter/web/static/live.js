@@ -28,6 +28,7 @@
     // #3: in focus mode the race card owns the screen while a run is in progress.
     document.documentElement.classList.toggle("racing", phase === "racing" || phase === "countdown");
     $("btn-abort").hidden = !(phase === "racing" || phase === "countdown" || phase === "armed");
+    renderGettingStarted();
   }
 
   // #2: colour the race clock by pace vs the PB at the last gate crossing.
@@ -40,9 +41,10 @@
 
   function renderSession(s) {
     state.session = s;
-    var line = s && s.known ? "<b>" + esc(s.track_name) + "</b>" + (s.scenery ? " · " + esc(s.scenery) : "") + (s.quad_type ? " · " + esc(s.quad_type) : "") + (s.race_laps ? " · " + s.race_laps + " laps" : "") + (s.source ? ' <span class="muted small">(' + s.source + ")</span>" : "") + (s.identified ? "" : ' <span class="pill bad" title="no online track id: this run will not count as a PB">no id</span>')
+    var line = s && s.known ? "<b>" + esc(s.track_name) + "</b>" + (s.scenery ? " · " + esc(s.scenery) : "") + (s.quad_type ? " · " + esc(s.quad_type) : "") + (s.race_laps ? " · " + s.race_laps + " laps" : "") + (s.source ? ' <span class="muted small">(' + s.source + ")</span>" : "") + (s.identified ? "" : ' <span class="pill bad" data-help="noid" title="no online track id — tap for help">no id</span>')
       : '<span class="muted">no track set — tap “Track…”</span>';
     $("session-line").innerHTML = line;
+    renderGettingStarted();
   }
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
 
@@ -51,6 +53,19 @@
     state.connected = !!(c && c.connected);
     if (!state.connected && state.phase === "idle") setPhase("offline");
     if (state.connected && state.phase === "offline") setPhase("idle");
+    renderGettingStarted();
+  }
+
+  // First-run checklist: shown until the address is set, the game has connected
+  // once and a track is picked; never while a run is on.
+  function renderGettingStarted() {
+    var card = $("getting-started"); if (!card) return;
+    var steps = { "gs-host": !!window.SPLITTER_GAME_HOST_SET, "gs-game": state.connected, "gs-track": !!(state.session && state.session.known) };
+    var all = true;
+    Object.keys(steps).forEach(function (id) { var li = $(id); if (li) li.classList.toggle("done", steps[id]); if (!steps[id]) all = false; });
+    if (state.connected) window.SPLITTER_GAME_HOST_SET = true;
+    var busy = state.phase === "racing" || state.phase === "countdown" || state.phase === "armed";
+    card.hidden = all || busy;
   }
 
   function renderReference(ref) {

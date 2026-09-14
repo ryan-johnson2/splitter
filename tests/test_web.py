@@ -422,3 +422,46 @@ async def test_manual_abort_endpoint_ends_a_stuck_run(client: AsyncClient) -> No
     assert (await client.get("/api/races/1")).json()["status"] == "aborted"
     assert (await client.post("/api/race/abort")).json()["aborted"] is False
     assert 'id="btn-abort"' in (await client.get("/")).text
+
+
+async def test_desktop_first_run_prefills_the_game_address(tmp_path: Any, monkeypatch: Any) -> None:
+    from splitter.core import netinfo
+
+    monkeypatch.setattr(netinfo, "default_route_ipv4", lambda: "192.168.7.7")
+    monkeypatch.setattr(netinfo, "local_ipv4_addresses", lambda: ["192.168.7.7", "10.0.0.2"])
+    app = create_app(Config(database_url=f"sqlite+aiosqlite:///{tmp_path}/d.db", desktop=True))
+    app.state.catalog = _FakeCatalog()
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c,
+    ):
+        assert app.state.settings.get("game_host") == "192.168.7.7"
+        html = (await c.get("/settings")).text
+        assert 'value="192.168.7.7"' in html and ">10.0.0.2<" in html  # chips for both
+        live = (await c.get("/")).text
+        assert "pre-filled with this PC" in live and "window.SPLITTER_GAME_HOST_SET = true" in live
+
+
+async def test_server_build_does_not_guess_the_game_address(client: AsyncClient) -> None:
+    assert client.app.state.settings.get("game_host") == ""  # type: ignore[attr-defined]
+    html = (await client.get("/settings")).text
+    assert "This PC's addresses" not in html
+    live = (await client.get("/")).text
+    assert 'id="getting-started"' in live and "window.SPLITTER_GAME_HOST_SET = false" in live
+
+
+async def test_track_page_has_section_trends_after_two_runs(client: AsyncClient) -> None:
+    await _fly_one(client)
+    await _fly_one(client, scale=1.1)
+    html = (await client.get("/tracks/detail?track_id=500&quad_model=0&laps=3")).text
+    assert 'id="trend-chart"' in html and '"points"' in html
+
+
+async def test_help_hooks_are_on_every_page(client: AsyncClient) -> None:
+    html = (await client.get("/races")).text
+    assert 'data-help="game"' in html and 'data-help="link"' in html
+    assert "window.SPLITTER_GAME_ADDR" in html
+    live = (await client.get("/")).text
+    assert 'data-help="track"' in live
+    js = (await client.get("/static/link.js")).text
+    assert "Websocket IMU Data" in js and "restart the game" in js

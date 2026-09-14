@@ -71,20 +71,19 @@
   <figcaption><b>1</b> Options → Main Settings. Scroll to the bottom of the list. <b>2</b> Websocket Communication → Yes. <b>3</b> Websocket IMU Data → Yes.</figcaption>
 </figure>
 
-<h2>3. Point Splitter at the game</h2>
-<p>The game only listens on your PC's network address, never on “localhost”, so Splitter needs to know that address even though both run on the same machine.</p>
+<h2>3. Check that Splitter can see the game</h2>
+<p>The game only listens on your PC's network address, never on “localhost”, so Splitter needs that address even though both run on the same machine. <b>Splitter fills it in for you on first launch.</b></p>
 <ol class="steps">
-  <li><span class="ui">Find your PC's address:</span> press <kbd>Win</kbd> + <kbd>R</kbd>, type <code>cmd</code>, press Enter, then type <code>ipconfig</code> and press Enter. Look for <span class="ui">IPv4 Address</span> under your Wi-Fi or Ethernet adapter. It looks like <code>192.168.1.23</code>.</li>
-  <li>In Splitter open the <span class="ui">Settings</span> page (top menu).</li>
-  <li>Type that address into <span class="ui">Game PC address</span>. Leave <span class="ui">Port</span> at <code>60003</code>.</li>
+  <li>In Splitter open the <span class="ui">Settings</span> page (top menu). <span class="ui">Game PC address</span> should already show an address like <code>192.168.1.23</code>. Leave <span class="ui">Port</span> at <code>60003</code>.</li>
   <li>Put your VelociDrone pilot name in <span class="ui">Your player name</span>. It is only used to pick you out when other pilots are in a room, but set it now so it is there.</li>
   <li>Click <span class="ui">Save</span>.</li>
+  <li>If the header never shows <span class="ui">Game connected</span> and your PC has more than one network adapter (Wi-Fi and Ethernet, a VPN), tap one of the other addresses listed under the field and save again.</li>
 </ol>
 <figure class="shot">
   <img src="guide-settings.png" alt="The Settings page">
   <figcaption>The Settings page. Only the top three fields matter for the beta.</figcaption>
 </figure>
-<p>With VelociDrone running and the feed turned on, the top-right corner of every Splitter page shows <span class="ui">Game connected</span> with a green dot. If it says <span class="ui">offline</span> or <span class="ui">reconnecting</span>, check that the game is running, that you restarted it after step 2, and that the address is right.</p>
+<p>With VelociDrone running and the feed turned on, the top-right corner of every Splitter page shows <span class="ui">Game connected</span> with a green dot. If it says <span class="ui">offline</span> or <span class="ui">reconnecting</span>, <b>tap it</b>: Splitter shows what to check. The Live page also shows a short “Getting started” checklist until everything is in place.</p>
 <div class="note"><b>Two dots in the corner.</b> <span class="ui">Splitter</span> is the page's own link to the timer, <span class="ui">Game</span> is the timer's link to VelociDrone. Both should be green while you fly.</div>
 
 <h2>4. Fly</h2>
@@ -127,6 +126,7 @@
 <ul>
   <li>The exe is not code-signed, so Windows warns on first run and Defender may flag it (section 1).</li>
   <li>In single player you must pick the track yourself (step 4). Hosted multiplayer rooms report it automatically.</li>
+  <li>Something not obvious? Tap the thing that looks wrong: the header dots, the <span class="ui">?</span> next to Track…, and the “no id” tag all open a short help note.</li>
   <li>Speed, flight path and crash detection need <span class="ui">Websocket IMU Data</span> on and the Betaflight flight controller model.</li>
   <li>Closing the Splitter window stops the timer. Runs already saved are kept in <code>splitter-data</code>.</li>
 </ul>

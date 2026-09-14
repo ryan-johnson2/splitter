@@ -21,7 +21,12 @@ async def live_page(request: Request) -> Any:
     return templates.TemplateResponse(
         request,
         "live.html",
-        {"snapshot": controller.snapshot(), "settings": request.app.state.settings},
+        {
+            "snapshot": controller.snapshot(),
+            "settings": request.app.state.settings,
+            "game_host_set": bool(request.app.state.settings.get("game_host")),
+            "desktop": request.app.state.config.desktop,
+        },
     )
 
 

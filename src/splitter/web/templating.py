@@ -22,6 +22,7 @@ def _site_context(request: Any) -> dict[str, Any]:
         "brand_name": (settings.get("brand_name").strip() if settings else "") or "Splitter",
         "app_version": __version__,
         "game_connected": bool(bridge and bridge.connected),
+        "game_addr": f"{bridge.host}:{bridge.port}" if bridge and bridge.host else "",
         "time_format": style,
         "pace_yellow_s": settings.get_float("pace_yellow_s") if settings else 2.0,
         # Per-request override of the global so every page honours the setting.

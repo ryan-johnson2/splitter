@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from splitter.config import Config
-from splitter.core import quads
+from splitter.core import netinfo, quads
 from splitter.db import repos
 from splitter.db.engine import create_engine, create_session_factory, init_db
 from splitter.db.runtime_settings import RuntimeSettings
@@ -64,6 +64,12 @@ def create_app(config: Config | None = None) -> FastAPI:
             pruned = await repos.prune_event_log(session, settings.get_int("event_log_keep"))
             if pruned:
                 log.info("pruned %d old event log rows", pruned)
+            if cfg.desktop and not settings.get("game_host"):
+                # Same PC as the game, which listens on the LAN address, never loopback.
+                guess = netinfo.default_route_ipv4()
+                if guess:
+                    await settings.set(session, "game_host", guess)
+                    log.info("desktop first run: game address pre-filled with %s", guess)
 
         hub = LiveHub()
         bridge: GameBridge

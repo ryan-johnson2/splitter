@@ -53,6 +53,7 @@ class TrackAnalysis:
     crash_runs: int
     seeded: bool = False
     layout: list[dict[str, Any]] = field(default_factory=list)
+    trends: list[dict[str, Any]] = field(default_factory=list)  # per section: name, best, points
 
 
 async def track_analysis(
@@ -109,6 +110,16 @@ async def track_analysis(
         crash_runs=sum(1 for r in races if r.crash_count),
         seeded=seeded,
         layout=[s.to_dict() for s in sections],
+        trends=[
+            {
+                "ordinal": st.section.ordinal,
+                "name": st.section.name,
+                "best": st.best_ms,
+                "points": st.trend,  # [race_id, mean per-lap ms] per finished run
+            }
+            for st in stats
+            if st.best_ms is not None
+        ],
     )
 
 

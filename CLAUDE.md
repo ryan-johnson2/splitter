@@ -146,6 +146,26 @@ to the event log at most once per 5 s.
   section and lap vs the same lap of the PB, crash marks (✕ on the path and speed
   charts), gate crossings collapsed at the bottom. Live page untouched (by design).
 
+## Helping non-technical users (0.5.0)
+
+- **Desktop = same PC as the game.** `desktop_entry.py` sets `SPLITTER_DESKTOP=1`
+  → `Config.desktop`. On first run with no `game_host`, startup pre-fills it
+  with `core/netinfo.py::default_route_ipv4()` (UDP-connect trick, nothing is
+  sent); the Settings page lists every local IPv4 as one-tap chips
+  (`local_ipv4_addresses()`, default route first) for PCs with several
+  adapters. Server/LXC builds never guess (the game is elsewhere).
+- **Getting-started checklist** on the live page (`#getting-started`): address
+  set / game connected / track picked, ticked live from the link, hidden once
+  all done or while a run is on.
+- **Help popovers** (`link.js`, `HELP` map): anything with `data-help="key"`
+  opens a click popover (hover titles don't work on tablets). Keys: `link`,
+  `game` (adapts to the bridge state, shows the configured address and last
+  error), `track`, `abort`, `noid`. The header indicators are buttons. Add a
+  key there rather than sprinkling text into pages.
+- Track page: per-section trend chart (`analysis.trends`, y = mean per-lap
+  section time minus the section's best-ever; legend isolates one section).
+  Race page flight path labels one gate per number, every 5th on long tracks.
+
 ## Wire facts to remember
 
 All race-event scalars are strings (`"3"`, `"69.711"`, `"True"`), `uid` in
