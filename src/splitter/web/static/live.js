@@ -225,7 +225,7 @@
   // ── capture on/off ────────────────────────────────────────────
   function renderCapture() {
     var on = state.capture !== false;
-    $("btn-capture").textContent = on ? "Pause capture" : "Resume capture";
+    $("btn-capture").innerHTML = on ? '<span class="ico">⏸</span> Pause capture' : '<span class="ico">▶</span> Resume capture';
     $("btn-capture").classList.toggle("primary", !on);
     $("capture-pill").hidden = on;
   }
@@ -302,8 +302,8 @@
   }
   function paintFsButtons() {
     var fs = !!document.fullscreenElement, focus = root.classList.contains("focus");
-    fsBtn.textContent = fs && !focus ? "🡼" : "⛶"; fsBtn.title = fs ? "leave fullscreen" : "fullscreen, menus visible";
-    focusBtn.classList.toggle("primary", focus); focusBtn.title = focus ? "show menus" : "focus: fullscreen, race only";
+    fsBtn.innerHTML = fs && !focus ? '<span class="ico">🡼</span> Exit fullscreen' : '<span class="ico">⛶</span> Fullscreen'; fsBtn.title = fs ? "leave fullscreen" : "fullscreen, menus visible";
+    focusBtn.classList.toggle("primary", focus); focusBtn.innerHTML = focus ? '<span class="ico">☰</span> Show menus' : '<span class="ico">◉</span> Focus'; focusBtn.title = focus ? "show menus" : "focus: fullscreen, race only";
   }
   // Installed as an app or inside the native shell there is no browser chrome
   // to hide, so focus is just the layout (and the plain-fullscreen button is gone).
