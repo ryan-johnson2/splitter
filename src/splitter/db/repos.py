@@ -11,7 +11,8 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from splitter.core.crashes import Crash
-from splitter.core.sections import Section
+from splitter.core.geometry import GatePosition, gate_positions
+from splitter.core.sections import Section, lap_segments
 from splitter.core.splits import Reference, build_reference
 from splitter.db.models import EventLog, GateTime, Lap, Race, TelemetrySample, TrackSection
 from splitter.util import utcnow
@@ -378,3 +379,32 @@ async def races_with_telemetry(session: AsyncSession, race_ids: list[int]) -> li
         .group_by(TelemetrySample.race_id)
     )
     return [int(r) for r in (await session.execute(stmt)).scalars().all()]
+
+
+async def track_geometry(
+    session: AsyncSession, track_id: int, limit: int = 6
+) -> tuple[int | None, dict[int, GatePosition]]:
+    """Gates per lap and averaged gate positions from recent finished traced runs."""
+    stmt = (
+        select(Race)
+        .where(
+            (Race.track_id == track_id) & (Race.status == "finished") & (Race.telemetry_samples > 0)
+        )
+        .order_by(Race.id.desc())
+        .limit(limit)
+    )
+    races = list((await session.execute(stmt)).scalars().all())
+    if not races:
+        return None, {}
+    counts = [r.gates_per_lap for r in races if r.gates_per_lap]
+    count = max(set(counts), key=counts.count) if counts else None
+    runs = []
+    for r in races:
+        trace = await telemetry_for_race(session, r.id)
+        crossings = [
+            (k, s.cumulative_ms)
+            for segs in lap_segments(r.gate_times).values()
+            for k, s in enumerate(segs, start=1)
+        ]
+        runs.append((trace, crossings))
+    return count, gate_positions(runs)

@@ -44,6 +44,7 @@ async def settings_save(
     brand_name: str = Form("Splitter"),
     time_format: str = Form("seconds"),
     pace_yellow_s: float = Form(2.0),
+    show_getting_started: str = Form("0"),
 ) -> Any:
     state = request.app.state
     settings = state.settings
@@ -59,6 +60,7 @@ async def settings_save(
         "brand_name": brand_name.strip() or "Splitter",
         "time_format": time_format if time_format in TIME_FORMATS else "seconds",
         "pace_yellow_s": f"{max(0.1, min(60.0, pace_yellow_s)):g}",
+        "show_getting_started": "1" if show_getting_started == "1" else "0",
     }
     host_changed = values["game_host"] != settings.get("game_host") or values[
         "game_port"

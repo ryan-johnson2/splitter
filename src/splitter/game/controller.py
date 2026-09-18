@@ -38,7 +38,8 @@ from velocidrone_ws import (
 )
 
 from splitter.core import crashes as crash_detect
-from splitter.core import quads
+from splitter.core import geometry, quads, sections, trackcheck
+from splitter.core.geometry import GatePosition
 from splitter.core.splits import Reference
 from splitter.core.telemetry import SegmentStats, TelemetryBuffer
 from splitter.core.timing import Crossing, RaceTracker
@@ -113,6 +114,10 @@ class RaceController:
         self.telemetry = TelemetryBuffer()
         self.game_loss_grace_s = GAME_LOSS_GRACE_S
         self._loss_task: asyncio.Task[None] | None = None
+        # Capture off = stay connected to the game but record nothing.
+        self.capture = settings.get_bool("capture_enabled")
+        self._geometry_cache: dict[int, tuple[int | None, dict[int, GatePosition]]] = {}
+        self.last_track_check: dict[str, Any] | None = None
         self.race_id: int | None = None
         self.race_started_at: datetime | None = None
         self.armed = False
@@ -182,6 +187,8 @@ class RaceController:
             "last_result": self.last_result,
             "imu": {"frames": self.imu_frames, "last_at": _iso(self.imu_last_at)},
             "clients": self._hub.clients,
+            "capture": self.capture,
+            "track_check": self.last_track_check,
         }
 
     async def set_manual_session(
@@ -260,6 +267,39 @@ class RaceController:
         self._hub.broadcast("notice", {"message": f"Race aborted: {reason}", "level": "warn"})
         return race_id
 
+    async def set_capture(self, enabled: bool) -> None:
+        """Pause/resume recording. Pausing mid-run aborts that run."""
+        if enabled == self.capture:
+            return
+        self.capture = enabled
+        if not enabled:
+            self.armed = False
+            if self.race_active:
+                await self.abort_race("capture paused")
+        async with self._sf() as db:
+            await self._settings.set(db, "capture_enabled", "1" if enabled else "0")
+        log.info("capture %s", "resumed" if enabled else "paused")
+        self._hub.broadcast("capture", {"enabled": enabled})
+
+    async def clear_session(self) -> None:
+        """Forget the track (the pilot must pick again); quad and laps stay."""
+        s = self.session
+        self.session = SessionState(
+            quad_type=s.quad_type,
+            quad_size=s.quad_size,
+            quad_model_id=s.quad_model_id,
+            quad_class_id=s.quad_class_id,
+            race_mode=s.race_mode,
+            race_format=s.race_format,
+            race_laps=s.race_laps,
+            player_name=s.player_name,
+            source=SOURCE_MANUAL,
+        )
+        self.reference = None
+        await self._persist_session()
+        self._hub.broadcast("session", self.session.to_dict())
+        self._hub.broadcast("reference", self._reference_dict())
+
     async def on_game_state(self, connected: bool) -> None:
         """Game link changed. A run cannot survive losing the game: after a short
         grace (a blip may reconnect) the race is aborted instead of ticking forever."""
@@ -268,6 +308,9 @@ class RaceController:
             if self._loss_task is not None:
                 self._loss_task.cancel()
                 self._loss_task = None
+            if not self._settings.get_bool("game_ever_connected"):
+                async with self._sf() as db:
+                    await self._settings.set(db, "game_ever_connected", "1")
             return
         if self.race_id is None or self._loss_task is not None:
             return
@@ -381,6 +424,8 @@ class RaceController:
         )
 
     async def _on_race_status(self, data: RaceStatusEvent) -> None:
+        if not self.capture:
+            return
         if data.is_start:
             if self.race_active:
                 log.info("new race started while one was running — aborting the old one")
@@ -400,6 +445,8 @@ class RaceController:
             log.info("unknown raceAction %r", data.race_action)
 
     async def _on_countdown(self, data: CountdownEvent) -> None:
+        if not self.capture:
+            return
         self.countdown = data.count_value
         self._hub.broadcast("countdown", {"count": data.count_value})
         if data.is_go:
@@ -415,6 +462,8 @@ class RaceController:
                     await db.commit()
 
     async def _on_race_data(self, data: RaceDataEvent) -> None:
+        if not self.capture:
+            return
         me = self._pick_me(data)
         if me is None:
             return
@@ -591,8 +640,76 @@ class RaceController:
         payload = self._crossing_dict(crossing) | _stats_dict(gate_stats)
         payload["lap_done"] = lap_payload
         self._hub.broadcast("crossing", payload)
+        if crossing.lap_done is not None and crossing.lap_done.lap == 1:
+            await self._check_track()
         if crossing.finished:
             await self._finish_race(aborted=False)
+
+    async def _track_geometry(
+        self, track_id: int
+    ) -> tuple[int | None, dict[int, GatePosition]] | None:
+        if track_id not in self._geometry_cache:
+            async with self._sf() as db:
+                self._geometry_cache[track_id] = await repos.track_geometry(db, track_id)
+        count, positions = self._geometry_cache[track_id]
+        return (count, positions) if (count or positions) else None
+
+    async def _check_track(self) -> None:
+        """After lap 1: does this run look like the session's track? (#5 follow-up)
+
+        Single player never names the track, so a pilot who switched tracks in
+        the game would record runs and PBs against the old one. A gate-count
+        mismatch is certain: the track is unset and this run loses its track id
+        (no PB). A geometry mismatch only asks; the live page shows a prompt.
+        """
+        s, tracker, race_id = self.session, self.tracker, self.race_id
+        if tracker is None or race_id is None or not s.identified:
+            return
+        ref = await self._track_geometry(s.track_id)
+        if ref is None:
+            return
+        ref_count, ref_positions = ref
+        crossings = [
+            _CrossingRef(c.seq, c.lap, c.lap_done.lap if c.lap_done else None, c.cumulative_ms)
+            for c in tracker.crossings
+        ]
+        run_positions: dict[int, geometry.Point] = {}
+        for k, c in enumerate(sections.lap_segments(crossings).get(1, []), start=1):
+            p = geometry.position_at(self.telemetry.samples, c.cumulative_ms)
+            if p is not None:
+                run_positions[k] = p
+        check = trackcheck.compare(tracker.gates_per_lap, run_positions, ref_count, ref_positions)
+        self.last_track_check = {
+            "race_id": race_id,
+            "verdict": check.verdict,
+            "confidence": check.confidence,
+            "reason": check.reason,
+            "gates_compared": check.gates_compared,
+            "track": s.to_dict(),
+            "unset": False,
+        }
+        if check.verdict != "different":
+            return
+        log.warning(
+            "race %d does not look like %r (%s): %s",
+            race_id,
+            s.track_name,
+            check.confidence,
+            check.reason,
+        )
+        if check.confidence == "high":
+            self.last_track_check["unset"] = True
+            async with self._sf() as db:
+                race = await db.get(Race, race_id)
+                if race is not None:
+                    race.track_id = 0
+                    race.track_name = ""
+                    race.scenery = ""
+                    race.scene_id = 0
+                    race.track_source = ""
+                    await db.commit()
+            await self.clear_session()
+        self._hub.broadcast("track_check", self.last_track_check)
 
     async def _finish_race(self, aborted: bool) -> None:
         race_id, tracker = self.race_id, self.tracker
@@ -652,6 +769,7 @@ class RaceController:
             race.crashes = json.dumps([c.to_dict() for c in found])
             race.crash_count = len(found)
             await db.commit()
+            self._geometry_cache.pop(race.track_id, None)
             is_best = False
             if not aborted:
                 best_id = await repos.recalculate_best(db, repos.race_key(race))
@@ -724,6 +842,7 @@ class RaceController:
         return len(rows)
 
     def _reset_race(self) -> None:
+        self.last_track_check = None
         self.race_id = None
         self.tracker = None
         self.reference = None

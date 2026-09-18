@@ -17,6 +17,11 @@ DEFAULTS: dict[str, str] = {
     # first session/player event, else the only pilot in the snapshot.
     "player_name": "",
     "auto_connect": "1",
+    # Capture on/off: paused = stay connected but record nothing (free flying).
+    "capture_enabled": "1",
+    # First-run checklist on the live page; game_ever_connected flips once.
+    "show_getting_started": "1",
+    "game_ever_connected": "0",
     # IMU trace: keep it, and at what rate (the game sends 60 Hz).
     "telemetry_enabled": "1",
     "telemetry_store_hz": "20",

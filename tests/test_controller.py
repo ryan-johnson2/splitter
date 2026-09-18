@@ -379,3 +379,63 @@ async def test_losing_the_game_mid_race_aborts_after_the_grace(
 
 async def test_manual_abort_without_a_race_is_a_no_op(controller: RaceController) -> None:
     assert await controller.abort_race("manual") is None
+
+
+async def test_capture_paused_ignores_races_and_persists(
+    controller: RaceController, hub: LiveHub, session_factory
+) -> None:
+    await controller.handle_event(h.session())
+    q = hub.subscribe()
+    await controller.set_capture(False)
+    assert not controller.capture and controller._settings.get("capture_enabled") == "0"
+    await controller.handle_event(h.status("start"))
+    await controller.handle_event(h.countdown(0))
+    for lap, gate, t, fin in h.two_lap_race():
+        await controller.handle_event(h.racedata(lap, gate, t, fin))
+    await controller.handle_event(h.status("race finished"))
+    assert not controller.race_active
+    async with session_factory() as db:
+        assert (await db.execute(select(Race))).scalars().all() == []
+    kinds = [m["type"] for m in h.drain(q)]
+    assert "capture" in kinds and "race_started" not in kinds
+    # Pausing mid-run aborts it.
+    await controller.set_capture(True)
+    await controller.handle_event(h.status("start"))
+    await controller.handle_event(h.countdown(0))
+    await controller.handle_event(h.racedata(0, 1, 1.0, False))
+    await controller.handle_event(h.racedata(1, 2, 2.0, False))
+    assert controller.race_active
+    await controller.set_capture(False)
+    assert not controller.race_active
+    async with session_factory() as db:
+        race = (await db.execute(select(Race))).scalar_one()
+        assert race.status == "aborted"
+
+
+async def test_a_different_gate_count_unsets_the_track_after_lap_one(
+    controller: RaceController, hub: LiveHub, session_factory
+) -> None:
+    await controller.handle_event(h.session())  # Practice Loop, id 500
+    await fly(controller, imu=True)  # a finished traced run: the track's reference geometry
+    q = hub.subscribe()
+    # Next run: four checkpoints per lap instead of three.
+    await controller.handle_event(h.status("start"))
+    await controller.handle_event(h.countdown(0))
+    for lap, gate, t, fin in [
+        (0, 1, 1.0, False),
+        (1, 2, 2.0, False),
+        (1, 3, 3.0, False),
+        (1, 4, 4.0, False),
+        (1, 5, 5.0, False),
+        (2, 2, 6.0, False),
+    ]:
+        await controller.handle_event(h.racedata(lap, gate, t, fin))
+    check = next(m for m in h.drain(q) if m["type"] == "track_check")["data"]
+    assert check["verdict"] == "different" and check["confidence"] == "high" and check["unset"]
+    assert check["track"]["track_id"] == 500 and "4 gates" in check["reason"]
+    assert not controller.session.identified and controller.reference is None
+    async with session_factory() as db:
+        race = await db.get(Race, check["race_id"])
+        assert race is not None and race.track_id == 0 and race.track_name == ""
+    await controller.handle_event(h.status("abort"))
+    assert controller.last_track_check is None

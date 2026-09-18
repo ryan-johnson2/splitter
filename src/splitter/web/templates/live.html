@@ -4,17 +4,20 @@
 {% block content %}
 <div class="state-banner" id="banner">
   <span class="pill dim" id="phase">idle</span>
+  <span class="pill warn" id="capture-pill" hidden data-help="capture" title="tap for help">capture paused</span>
   <span class="session" id="session-line">—</span>
   <span class="actions">
     <button type="button" class="btn sm" id="btn-session">Track…</button><button type="button" class="btn sm help-btn" data-help="track" title="what is this?">?</button>
     <button type="button" class="btn sm" id="btn-reconnect" title="reconnect to the game">↻</button>
     <button type="button" class="btn sm danger" id="btn-abort" hidden title="abort this run here and in the game">Abort</button>
+    <button type="button" class="btn sm" id="btn-capture" title="pause or resume recording runs">Pause capture</button>
     <button type="button" class="btn sm" id="btn-fullscreen" title="fullscreen, menus visible">⛶</button>
     <button type="button" class="btn sm" id="btn-focus" title="focus: fullscreen, race only">◉</button>
   </span>
 </div>
 
 
+{% if show_getting_started %}
 <div class="card" id="getting-started" hidden>
   <div class="card-head"><h2>Getting started</h2><span class="muted small">three things before the first run</span></div>
   <ol class="checklist">
@@ -22,7 +25,9 @@
     <li id="gs-game"><span class="mark"></span><div><b>Turn on the game's data feed.</b> <span class="todo">In VelociDrone: <i>Options → Main Settings</i>, set <i>Websocket Communication</i> and <i>Websocket IMU Data</i> to Yes, then <b>restart the game</b>.</span><span class="done">Game connected.</span></div></li>
     <li id="gs-track"><span class="mark"></span><div><b>Pick the track.</b> <span class="todo">Tap <b>Track…</b> above and choose the track you are flying. Single player never says which, and personal bests need it.</span><span class="done">Track set.</span></div></li>
   </ol>
+  <p class="help small">Hide this for good under Settings.</p>
 </div>
+{% endif %}
 
 <div class="live-grid">
   <div>
@@ -84,6 +89,7 @@
       <div class="field"><label for="f-laps">Laps</label><input id="f-laps" name="race_laps" type="number" min="0" max="99"></div>
       <div class="field"><label for="f-size">Size</label><input id="f-size" name="quad_size" placeholder="5"></div>
     </div>
+    <label class="switch" id="apply-last-wrap" hidden><input type="checkbox" id="apply-last" checked> Also apply to run <span id="apply-last-id"></span></label>
     <div class="form-actions">
       <button type="submit" class="primary">Save</button>
       <button type="button" class="btn" id="session-cancel">Cancel</button>
@@ -91,10 +97,19 @@
   </form>
 </dialog>
 
+<dialog id="track-check-dialog">
+  <h2>Did you change tracks?</h2>
+  <p id="track-check-text"></p>
+  <div class="form-actions">
+    <button type="button" class="primary" id="track-check-pick">Pick the track…</button>
+    <button type="button" class="btn" id="track-check-same">No, same track</button>
+  </div>
+</dialog>
+
 <div class="toast-wrap" id="toasts"></div>
 {% endblock %}
 {% block scripts %}
-<script>window.SPLITTER_SNAPSHOT = {{ snapshot | tojson }}; window.SPLITTER_GAME_HOST_SET = {{ game_host_set | tojson }};</script>
+<script>window.SPLITTER_SNAPSHOT = {{ snapshot | tojson }}; window.SPLITTER_GAME_HOST_SET = {{ game_host_set | tojson }}; window.SPLITTER_EVER_CONNECTED = {{ game_ever_connected | tojson }};</script>
 <script src="/static/picker.js?v={{ app_version }}"></script>
 <script src="/static/live.js?v={{ app_version }}"></script>
 {% endblock %}

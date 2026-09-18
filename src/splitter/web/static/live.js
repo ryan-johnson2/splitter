@@ -60,10 +60,10 @@
   // once and a track is picked; never while a run is on.
   function renderGettingStarted() {
     var card = $("getting-started"); if (!card) return;
-    var steps = { "gs-host": !!window.SPLITTER_GAME_HOST_SET, "gs-game": state.connected, "gs-track": !!(state.session && state.session.known) };
+    var steps = { "gs-host": !!window.SPLITTER_GAME_HOST_SET, "gs-game": state.connected || !!window.SPLITTER_EVER_CONNECTED, "gs-track": !!(state.session && state.session.known) };
     var all = true;
     Object.keys(steps).forEach(function (id) { var li = $(id); if (li) li.classList.toggle("done", steps[id]); if (!steps[id]) all = false; });
-    if (state.connected) window.SPLITTER_GAME_HOST_SET = true;
+    if (state.connected) { window.SPLITTER_GAME_HOST_SET = true; window.SPLITTER_EVER_CONNECTED = true; }
     var busy = state.phase === "racing" || state.phase === "countdown" || state.phase === "armed";
     card.hidden = all || busy;
   }
@@ -159,6 +159,8 @@
   }
 
   function applySnapshot(snap) {
+    state.capture = snap.capture !== false; renderCapture();
+    if (snap.track_check && snap.track_check.verdict === "different") showTrackCheck(snap.track_check);
     renderConnection(snap.connection);
     renderSession(snap.session);
     renderReference(snap.reference);
@@ -208,6 +210,8 @@
       state.race = null;
     },
     race_aborted: function () { stopClock(); state.race = null; setPhase("idle"); },
+    capture: function (d) { state.capture = !!d.enabled; renderCapture(); toast(state.capture ? "Capture resumed" : "Capture paused — runs are not recorded", state.capture ? "ok" : "warn"); },
+    track_check: showTrackCheck,
     notice: function (n) { toast(n.message, n.level); }
   };
 
@@ -217,6 +221,41 @@
     // Link down: the game state is unknown, so do not claim idle-and-connected.
     link.on("close", function () { renderConnection(null); });
   }
+
+  // ── capture on/off ────────────────────────────────────────────
+  function renderCapture() {
+    var on = state.capture !== false;
+    $("btn-capture").textContent = on ? "Pause capture" : "Resume capture";
+    $("btn-capture").classList.toggle("primary", !on);
+    $("capture-pill").hidden = on;
+  }
+  $("btn-capture").onclick = function () {
+    var next = state.capture === false;
+    if (!next && state.race) { if (!confirm("Pause capture now? The current run will be aborted.")) return; }
+    fetch("/api/capture", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: next }) })
+      .then(function (r) { if (!r.ok) throw new Error("failed"); }).catch(function (e) { toast(e.message, "bad"); });
+  };
+
+  // ── "did you change tracks?" ──────────────────────────────────
+  var tcDlg = $("track-check-dialog"), pendingApply = 0, lastCheck = null;
+  function showTrackCheck(d) {
+    if (!d || d.verdict !== "different" || (lastCheck && lastCheck.race_id === d.race_id)) return;
+    lastCheck = d;
+    var name = (d.track && d.track.track_name) || "the selected track";
+    $("track-check-text").textContent = "This run (#" + d.race_id + ") does not look like " + name + ": " + d.reason + "." +
+      (d.unset ? " The track has been unset and this run will not count as a PB until you pick one." : " It is still recorded against " + name + ".");
+    if (!tcDlg.open) tcDlg.showModal();
+  }
+  $("track-check-pick").onclick = function () { tcDlg.close(); pendingApply = lastCheck ? lastCheck.race_id : 0; $("btn-session").onclick(); };
+  $("track-check-same").onclick = function () {
+    tcDlg.close();
+    if (!lastCheck || !lastCheck.unset || !lastCheck.track) return;
+    var t = lastCheck.track;
+    var body = { track_name: t.track_name, scenery: t.scenery, quad_type: t.quad_type, quad_size: t.quad_size, race_laps: t.race_laps || 0, track_id: t.track_id, scene_id: t.scene_id, track_source: t.track_source || "", quad_model_id: t.quad_model_id || 0, quad_class_id: t.quad_class_id || 0, apply_to_race_id: lastCheck.race_id };
+    fetch("/api/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(function (r) { if (!r.ok) throw new Error("could not restore the track"); toast("Track kept: " + t.track_name, "ok"); })
+      .catch(function (e) { toast(e.message, "bad"); });
+  };
 
   // ── session dialog ────────────────────────────────────────────
   var dlg = $("session-dialog");
@@ -235,9 +274,10 @@
       });
       trackPicker.setRecent(recent); trackPicker.showRecent();
     }).catch(function () {});
+    $("apply-last-wrap").hidden = !pendingApply; $("apply-last-id").textContent = "#" + pendingApply; $("apply-last").checked = true;
     dlg.showModal();
   };
-  $("session-cancel").onclick = function () { dlg.close(); };
+  $("session-cancel").onclick = function () { dlg.close(); pendingApply = 0; };
   $("session-form").onsubmit = function (ev) {
     ev.preventDefault();
     var fd = new FormData(ev.target);
@@ -245,9 +285,10 @@
                  track_id: parseInt(fd.get("track_id") || "0", 10) || 0, scene_id: parseInt(fd.get("scene_id") || "0", 10) || 0, track_source: fd.get("track_source") || "",
                  quad_model_id: parseInt(fd.get("quad_model_id") || "0", 10) || 0, quad_class_id: parseInt(fd.get("quad_class_id") || "0", 10) || 0 };
     if (!body.track_id) { toast("Pick the track from the search — PBs need its online id", "warn"); return; }
+    if (pendingApply && $("apply-last").checked) body.apply_to_race_id = pendingApply;
     fetch("/api/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
       .then(function (r) { if (!r.ok) return r.json().then(function (j) { throw new Error(j.detail || "save failed"); }); return r.json(); })
-      .then(function () { dlg.close(); toast("Track set", "ok"); })
+      .then(function (j) { dlg.close(); toast(j.applied ? "Track set and applied to run #" + pendingApply : "Track set", "ok"); pendingApply = 0; })
       .catch(function (e) { toast(e.message, "bad"); });
   };
   // Fullscreen (tablet): the Fullscreen API works over plain http on the LAN,

@@ -44,6 +44,7 @@
     </select>
     <p class="help">VelociDrone shows plain seconds; pick that to compare at a glance, or minutes for long runs.</p>
   </div>
+  <div class="field"><label class="switch"><input type="hidden" name="show_getting_started" value="0"><input type="checkbox" name="show_getting_started" value="1" {% if values.show_getting_started == "1" %}checked{% endif %}> Show the getting-started checklist on the Live page</label><p class="help">It only appears while something is still unset; turn it off once everyone has seen it.</p></div>
   <div class="field inline"><label for="pace_yellow_s">Pace colour: yellow up to</label><input id="pace_yellow_s" name="pace_yellow_s" type="number" min="0.1" max="60" step="0.1" value="{{ values.pace_yellow_s }}" style="width:6rem"> <span class="muted">seconds behind the PB at the last gate — green when ahead, red beyond this</span></div>
   <p class="small muted">{{ brand_name }} v{{ app_version }}</p>
 </div>

@@ -78,6 +78,7 @@
         "<li>Only one tool can listen to the game at a time — close other overlays or timers.</li></ul>" + err };
     },
     track: function () { return { title: "Track…", body: "Single player never tells Splitter which track you are on, so pick it here before you fly. Splitter remembers it until you change it. Runs without a track are saved but cannot be personal bests." }; },
+    capture: function () { return { title: "Capture paused", body: "Splitter stays connected to the game but records nothing: no runs, no PBs, no telemetry. Use it for free flying or practice you do not want in the log. Tap <b>Resume capture</b> when you want runs recorded again." }; },
     abort: function () { return { title: "Abort", body: "Ends the current run as aborted in Splitter and tells the game to abort too. Use it if the timer keeps running after you quit or crashed out of a race." }; },
     noid: function () { return { title: "No online track id", body: "This run's track has no online id, so it cannot be a personal best and has no reference. Pick the track with <b>Track…</b>, or fix it later on the Races page." }; }
   };

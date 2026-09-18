@@ -33,6 +33,8 @@ class SessionIn(BaseModel):
     # From the quad picker (catalog model id); 0 = unknown quad.
     quad_model_id: int = 0
     quad_class_id: int = 0
+    # Re-attribute this run too (the "did you change tracks?" prompt).
+    apply_to_race_id: int = 0
 
 
 @router.post("/session")
@@ -56,7 +58,34 @@ async def set_session(request: Request, body: SessionIn) -> dict[str, Any]:
         quad_model_id=max(0, body.quad_model_id),
         quad_class_id=max(0, body.quad_class_id),
     )
-    return dict(controller.session.to_dict())
+    applied = False
+    if body.apply_to_race_id > 0:
+        s = controller.session
+        async with request.app.state.session_factory() as db:
+            race = await repos.update_race(
+                db,
+                body.apply_to_race_id,
+                track_id=s.track_id,
+                track_name=s.track_name,
+                scenery=s.scenery,
+                scene_id=s.scene_id,
+                track_source=s.track_source,
+            )
+        applied = race is not None
+        await controller.refresh_reference()
+    return dict(controller.session.to_dict()) | {"applied": applied}
+
+
+class CaptureIn(BaseModel):
+    enabled: bool
+
+
+@router.post("/capture")
+async def capture(request: Request, body: CaptureIn) -> dict[str, Any]:
+    """Pause or resume recording; paused keeps the game link but ignores races."""
+    controller = request.app.state.controller
+    await controller.set_capture(body.enabled)
+    return {"enabled": controller.capture}
 
 
 @router.get("/quads")

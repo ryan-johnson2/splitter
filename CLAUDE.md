@@ -166,6 +166,22 @@ to the event log at most once per 5 s.
   section time minus the section's best-ever; legend isolates one section).
   Race page flight path labels one gate per number, every 5th on long tracks.
 
+- **Capture pause** (`capture_enabled` setting, `POST /api/capture`, live-page
+  button): the bridge stays connected but race status/countdown/racedata are
+  ignored; pausing mid-run aborts it. Snapshot carries `capture`.
+- **Track-change check** (`core/trackcheck.py`, `controller._check_track` after
+  lap 1): compares the run's gates-per-lap and lap-1 gate positions (from the
+  IMU buffer) with `repos.track_geometry` of the session's track (cached per
+  track id, dropped when a run on it finishes). Gate-count mismatch = high
+  confidence → the track is unset (`clear_session`) and the run loses its track
+  id (no PB); geometry ≥ 12 m off over ≥ 4 gates = medium → prompt only. The
+  live page shows "Did you change tracks?": *Pick the track…* opens the picker
+  with "also apply to run #n" (`POST /api/session` `apply_to_race_id`), *No,
+  same track* restores the old session onto the run. Snapshot carries
+  `track_check` so a reloaded page still sees the prompt.
+- Getting-started card: `show_getting_started` setting (Settings toggle);
+  the game step counts as done once `game_ever_connected` has flipped.
+
 ## Wire facts to remember
 
 All race-event scalars are strings (`"3"`, `"69.711"`, `"True"`), `uid` in

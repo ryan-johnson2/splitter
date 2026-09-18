@@ -465,3 +465,45 @@ async def test_help_hooks_are_on_every_page(client: AsyncClient) -> None:
     assert 'data-help="track"' in live
     js = (await client.get("/static/link.js")).text
     assert "Websocket IMU Data" in js and "restart the game" in js
+
+
+async def test_capture_toggle_and_session_reattribution(client: AsyncClient) -> None:
+    r = await client.post("/api/capture", json={"enabled": False})
+    assert r.json() == {"enabled": False}
+    assert (await client.get("/api/state")).json()["capture"] is False
+    assert (await client.post("/api/capture", json={"enabled": True})).json()["enabled"] is True
+    await _fly_one(client)
+    body = {
+        "track_name": "Sticky Track",
+        "track_id": 501,
+        "scene_id": 16,
+        "track_source": "official",
+        "apply_to_race_id": 1,
+    }
+    r = await client.post("/api/session", json=body)
+    assert r.status_code == 200 and r.json()["applied"] is True
+    d = (await client.get("/api/races/1")).json()
+    assert d["track_id"] == 501 and d["track_name"] == "Sticky Track" and d["is_best"]
+    live = (await client.get("/")).text
+    assert 'id="btn-capture"' in live and 'id="track-check-dialog"' in live
+
+
+async def test_getting_started_can_be_hidden_and_remembers_a_connection(
+    client: AsyncClient,
+) -> None:
+    assert 'id="getting-started"' in (await client.get("/")).text
+    controller = client.app.state.controller  # type: ignore[attr-defined]
+    await controller.on_game_state(True)
+    assert "window.SPLITTER_EVER_CONNECTED = true" in (await client.get("/")).text
+    r = await client.post(
+        "/settings",
+        data={
+            "game_host": "",
+            "game_port": "60003",
+            "time_format": "seconds",
+            "show_getting_started": "0",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert 'id="getting-started"' not in (await client.get("/")).text

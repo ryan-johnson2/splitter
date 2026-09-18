@@ -26,6 +26,8 @@ async def live_page(request: Request) -> Any:
             "settings": request.app.state.settings,
             "game_host_set": bool(request.app.state.settings.get("game_host")),
             "desktop": request.app.state.config.desktop,
+            "show_getting_started": request.app.state.settings.get_bool("show_getting_started"),
+            "game_ever_connected": request.app.state.settings.get_bool("game_ever_connected"),
         },
     )
 
