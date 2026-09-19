@@ -5,8 +5,12 @@
 //! 1. Resolve a **true-portable data dir**: `splitter-data/` beside the running executable
 //!    when that is writable, else the per-user app-data dir. The SQLite database, the
 //!    extracted sidecar and the log file all live there, so a copied exe carries its data.
-//! 2. Extract the **embedded sidecar** (the PyInstaller build of the Python server, baked
-//!    into this binary at compile time by `build.rs`) into `<data>/bin/`, once per version.
+//! 2. Unpack the **embedded sidecar** (the one-dir PyInstaller build of the Python server,
+//!    packed as a tar.gz and baked into this binary at compile time by `build.rs`) into
+//!    `<data>/bin/splitter-sidecar-<version>/`, once per version. One-dir rather than
+//!    one-file so nothing self-extracts into a temp folder on every launch — the
+//!    behaviour that makes unsigned PyInstaller one-file exes an antivirus false
+//!    positive (docs/code-signing.md).
 //! 3. Spawn it with `SPLITTER_DATA_DIR` set, read its stdout until it prints
 //!    `SPLITTER_READY <url>`, and open the main window at that URL. The sidecar binds all
 //!    interfaces on 8100 (fallback: ephemeral) so a tablet on the LAN can open the same
@@ -25,8 +29,13 @@ use std::time::{Duration, Instant};
 
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
-/// The sidecar executable, embedded at build time (see `build.rs`).
+/// The sidecar archive (tar.gz of the one-dir build), embedded at build time (see `build.rs`).
 static SIDECAR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sidecar.bin"));
+/// Top-level directory inside the archive and the executable's name (desktop/sidecar/build.py).
+const SIDECAR_NAME: &str = "splitter-sidecar";
+/// Written into the unpacked folder last; holds the archive size so a half-finished or
+/// differently built unpack is redone.
+const SIDECAR_MARKER: &str = ".unpacked";
 const SIDECAR_EMBEDDED: bool = matches!(env!("SPLITTER_SIDECAR_EMBEDDED").as_bytes(), b"1");
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -142,35 +151,74 @@ fn portable_data_dir() -> Option<PathBuf> {
     }
 }
 
-/// Write the embedded sidecar to `<data>/bin/splitter-sidecar-<version>[.exe]` if it is
-/// not there yet (or has a different size), and make it executable.
+/// Unpack the embedded sidecar archive into `<data>/bin/splitter-sidecar-<version>/` if
+/// it is not there yet (or was unpacked from a different archive), drop folders and
+/// files left by other versions, and return the path of the executable inside it.
 fn extract_sidecar(data_dir: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
     if !SIDECAR_EMBEDDED || SIDECAR.is_empty() {
         return Err("this build has no embedded sidecar (built with SPLITTER_ALLOW_EMPTY_SIDECAR)".into());
     }
     let bin_dir = data_dir.join("bin");
     fs::create_dir_all(&bin_dir)?;
-    let name = format!(
-        "splitter-sidecar-{}{}",
-        env!("SPLITTER_BUILD"),
-        if cfg!(windows) { ".exe" } else { "" }
-    );
-    let path = bin_dir.join(name);
-    let up_to_date = fs::metadata(&path)
-        .map(|m| m.len() == SIDECAR.len() as u64)
-        .unwrap_or(false);
+    let dir_name = format!("{SIDECAR_NAME}-{}", env!("SPLITTER_BUILD"));
+    let dir = bin_dir.join(&dir_name);
+    let exe_name = if cfg!(windows) { "splitter-sidecar.exe" } else { "splitter-sidecar" };
+    let exe = dir.join(exe_name);
+    let stamp = SIDECAR.len().to_string();
+
+    let up_to_date = fs::read_to_string(dir.join(SIDECAR_MARKER))
+        .map(|s| s.trim() == stamp)
+        .unwrap_or(false)
+        && exe.is_file();
     if !up_to_date {
-        log(format!("extracting sidecar ({} MB) to {}", SIDECAR.len() / 1_000_000, path.display()));
-        let tmp = path.with_extension("part");
-        fs::write(&tmp, SIDECAR)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755))?;
+        log(format!("unpacking sidecar ({} MB) to {}", SIDECAR.len() / 1_000_000, dir.display()));
+        let tmp = bin_dir.join(format!("{dir_name}.part"));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp)?;
+        let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(SIDECAR));
+        archive.set_preserve_permissions(true);
+        archive.set_overwrite(true);
+        for entry in archive.entries()? {
+            let mut entry = entry?;
+            let path = entry.path()?.into_owned();
+            // Every entry is under a top-level `splitter-sidecar/`; unpack it flat into tmp.
+            let rel = path
+                .strip_prefix(SIDECAR_NAME)
+                .map_err(|_| format!("unexpected entry in sidecar archive: {}", path.display()))?
+                .to_path_buf();
+            if rel.as_os_str().is_empty() {
+                continue;
+            }
+            let dst = tmp.join(rel);
+            if let Some(parent) = dst.parent() {
+                fs::create_dir_all(parent)?; // the archive has file entries only
+            }
+            entry.unpack(&dst)?;
         }
-        fs::rename(&tmp, &path)?;
+        if !tmp.join(exe_name).is_file() {
+            return Err("sidecar archive has no executable in it".into());
+        }
+        fs::write(tmp.join(SIDECAR_MARKER), &stamp)?;
+        let _ = fs::remove_dir_all(&dir);
+        fs::rename(&tmp, &dir)?;
     }
-    Ok(path)
+
+    // Older versions (one-dir folders, or the single exes of pre-0.5.2 builds) only
+    // take up space in a portable install; the current one is all that runs.
+    if let Ok(entries) = fs::read_dir(&bin_dir) {
+        for e in entries.flatten() {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with(SIDECAR_NAME) && name != dir_name {
+                let p = e.path();
+                let removed = if p.is_dir() { fs::remove_dir_all(&p) } else { fs::remove_file(&p) };
+                if removed.is_ok() {
+                    log(format!("removed old sidecar {}", p.display()));
+                }
+            }
+        }
+    }
+    Ok(exe)
 }
 
 /// Start the sidecar and wait for its `SPLITTER_READY <url>` line.

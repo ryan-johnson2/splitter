@@ -244,10 +244,15 @@ idempotent and is the upgrade path). Docker: `docker compose up -d`, data in
 ## Desktop / releases
 
 `desktop/` holds the portable native app: `sidecar/build.py` freezes the server
-with PyInstaller (`--tracks … --protect` Cython-compiles the private client in),
-`src-tauri/` is a Tauri 2 shell that **embeds** that binary (`build.rs`), extracts
-it into a portable `splitter-data/` folder beside the exe, spawns it and opens a
-window at its `SPLITTER_READY` URL (`splitter/desktop_entry.py`). Config reads
+with PyInstaller as a **one-dir** build (`--tracks … --protect` Cython-compiles
+the private client in) and packs it as `dist/splitter-sidecar.tar.gz`;
+`src-tauri/` is a Tauri 2 shell that **embeds** that archive (`build.rs`),
+unpacks it once per version into `splitter-data/bin/splitter-sidecar-<version>/`
+beside the exe (older versions removed; `.unpacked` marker = archive size),
+spawns it and opens a window at its `SPLITTER_READY` URL
+(`splitter/desktop_entry.py`). One-dir, never one-file: self-extracting exes are
+the classic Defender false positive; the binaries are unsigned and the signing
+options are in `docs/code-signing.md`. Config reads
 `SPLITTER_DATA_DIR` for the SQLite location. `.github/workflows/release-builds.yml`
 builds all of it on a `v*` tag, a `dev-*` tag, or on demand (publish=dev cuts a
 `dev-<date>` tag): portable exe per OS, LXC bundle, GHCR image, GitHub Release

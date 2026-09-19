@@ -14,8 +14,10 @@ On launch the shell:
 1. picks a data folder — `splitter-data/` **beside the executable** when that is
    writable (a true portable install: copy the exe and the folder together),
    otherwise the per-user app-data directory;
-2. extracts the embedded server (a PyInstaller build of `splitter`) into
-   `splitter-data/bin/` once per version and starts it with that data folder;
+2. unpacks the embedded server (a one-dir PyInstaller build of `splitter`,
+   carried inside the shell as a tar.gz) into
+   `splitter-data/bin/splitter-sidecar-<version>/` once per version, removes
+   older versions' folders, and starts it with that data folder;
 3. waits for the server's `SPLITTER_READY <url>` line and opens a window there.
 
 The server binds every interface on port 8100 (an ephemeral port if 8100 is
@@ -23,10 +25,18 @@ taken), so a tablet on the same LAN can open `http://<this pc>:8100/` while the
 window is up. Closing the window stops the server. Diagnostics land in
 `splitter-data/splitter-desktop.log`.
 
+**The binaries are not code-signed.** Windows SmartScreen warns on first run
+(*More info → Run anyway*) and Defender may flag the download (*Protection
+history → Allow*, then copy it again); macOS Gatekeeper wants a right-click →
+*Open* once. The sidecar is deliberately a one-*dir* PyInstaller build, unpacked
+once into a stable folder, rather than a self-extracting one-file exe, which is
+the classic antivirus false positive. The full story and the signing options
+are in [`docs/code-signing.md`](../docs/code-signing.md).
+
 ## Building locally
 
 ```sh
-python desktop/sidecar/build.py                     # → desktop/sidecar/dist/splitter-sidecar[.exe]
+python desktop/sidecar/build.py                     # → desktop/sidecar/dist/splitter-sidecar/ + splitter-sidecar.tar.gz
 cd desktop/src-tauri && npx -y @tauri-apps/cli@2 build --no-bundle
 # → desktop/src-tauri/target/release/splitter-desktop[.exe]
 ```

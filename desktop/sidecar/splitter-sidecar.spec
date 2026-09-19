@@ -1,7 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec for the Splitter sidecar: one self-contained executable that
-# serves the whole web app. Built by desktop/sidecar/build.py; embedded into the
-# Tauri shell by desktop/src-tauri/build.rs.
+# PyInstaller spec for the Splitter sidecar: a one-DIR build (an executable plus
+# an _internal/ folder) that serves the whole web app. Built by
+# desktop/sidecar/build.py, which packs the folder into one tar.gz that
+# desktop/src-tauri/build.rs embeds into the Tauri shell.
+#
+# One-dir, not one-file, on purpose: a one-file exe unpacks itself into a temp
+# folder on every launch, which is exactly what packers and droppers do, and
+# unsigned PyInstaller one-file builds are a well-known Defender / SmartScreen
+# false positive. A one-dir build is extracted once by the shell into a stable
+# folder and runs from there. See docs/code-signing.md.
 import os
 from pathlib import Path
 
@@ -48,12 +55,19 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="splitter-sidecar",
     console=True,  # the shell reads SPLITTER_READY from stdout; no window is created on Windows by the shell
     disable_windowed_traceback=False,
+    upx=False,
+    strip=False,
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    name="splitter-sidecar",  # → dist/splitter-sidecar/{splitter-sidecar[.exe], _internal/}
     upx=False,
     strip=False,
 )

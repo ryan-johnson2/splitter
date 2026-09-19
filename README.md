@@ -11,6 +11,14 @@ unsigned and rough edges remain. Problems and ideas go in
 ([PDF](docs/beta-guide/Splitter-beta-quick-start.pdf)) is the ten-minute
 walkthrough for Windows.
 
+**Windows will warn about the download.** Because the exe is not code-signed,
+SmartScreen shows "Windows protected your PC" on first run (*More info → Run
+anyway*) and Defender may flag or quarantine the file (*Windows Security →
+Protection history → Allow*, then copy it again). That is all the warning
+means. The build avoids the usual triggers (no self-extracting one-file exe, no
+UPX); the reasons, and the signing options a certificate would open up, are in
+[`docs/code-signing.md`](docs/code-signing.md).
+
 - **Live**: race clock, current lap, split vs PB at every gate, last lap and
   its delta, live speed, rolling gate log, result card with per-lap deltas.
 - **Races**: every run with track, quad, time, delta vs PB; per-race laps,

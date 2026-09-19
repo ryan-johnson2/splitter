@@ -1,9 +1,11 @@
 //! Embed the PyInstaller sidecar into the shell binary.
 //!
-//! `SPLITTER_SIDECAR` (env) names the sidecar executable to embed; it defaults to
-//! `../sidecar/dist/splitter-sidecar[.exe]`. The file is copied into `OUT_DIR` as
-//! `sidecar.bin` and pulled in by `include_bytes!` in `lib.rs`. A missing sidecar
-//! is a hard error at build time — better than shipping an empty shell — unless
+//! `SPLITTER_SIDECAR` (env) names the sidecar archive to embed: the tar.gz of the
+//! one-dir PyInstaller build that `desktop/sidecar/build.py` writes, defaulting to
+//! `../sidecar/dist/splitter-sidecar.tar.gz`. It is copied into `OUT_DIR` as
+//! `sidecar.bin` and pulled in by `include_bytes!` in `lib.rs`, which unpacks it
+//! into the data folder at launch. A missing sidecar is a hard error at build
+//! time — better than shipping an empty shell — unless
 //! `SPLITTER_ALLOW_EMPTY_SIDECAR=1` (for `cargo check` without a Python build).
 
 use std::path::PathBuf;
@@ -48,10 +50,7 @@ fn main() {
     println!("cargo:rustc-env=SPLITTER_BUILD={}", build_stamp(&pkg));
 
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
-    let default = {
-        let name = if cfg!(windows) { "splitter-sidecar.exe" } else { "splitter-sidecar" };
-        PathBuf::from("../sidecar/dist").join(name)
-    };
+    let default = PathBuf::from("../sidecar/dist/splitter-sidecar.tar.gz");
     let src = std::env::var_os("SPLITTER_SIDECAR").map(PathBuf::from).unwrap_or(default);
     println!("cargo:rerun-if-env-changed=SPLITTER_SIDECAR");
     println!("cargo:rerun-if-env-changed=SPLITTER_ALLOW_EMPTY_SIDECAR");
@@ -66,8 +65,8 @@ fn main() {
         println!("cargo:warning=building WITHOUT an embedded sidecar (SPLITTER_ALLOW_EMPTY_SIDECAR=1)");
     } else {
         panic!(
-            "sidecar not found at {} — run `python desktop/sidecar/build.py` first, \
-             or set SPLITTER_SIDECAR to the executable",
+            "sidecar archive not found at {} — run `python desktop/sidecar/build.py` first, \
+             or set SPLITTER_SIDECAR to its splitter-sidecar.tar.gz",
             src.display()
         );
     }

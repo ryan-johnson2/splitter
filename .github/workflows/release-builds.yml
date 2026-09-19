@@ -112,6 +112,10 @@ jobs:
       # ("Cannot fetch both <sha> and refs/tags/vX to refs/tags/vX").
       - uses: actions/checkout@v4
 
+      # The sidecar is a one-DIR PyInstaller build packed as a tar.gz (build.py); the
+      # shell embeds the archive and unpacks it once per version. One-file builds
+      # were dropped on purpose: self-extracting exes are what Defender flags
+      # (docs/code-signing.md).
       # The private track client. Skipped (with a notice) when the token is absent.
       - name: Check out velocidrone-libraries (private, optional)
         if: ${{ env.HAVE_TOKEN == 'true' }}
@@ -352,8 +356,10 @@ jobs:
             Build stamp: `${{ env.STAMP }}` (what every artifact reports as its version).
 
             **Desktop (portable, no install):** download the file for your OS and run it. It keeps
-            its data in a `splitter-data` folder next to the executable. Windows SmartScreen and
-            macOS Gatekeeper will warn once because the binaries are unsigned.
+            its data in a `splitter-data` folder next to the executable. The binaries are **not
+            code-signed**: Windows SmartScreen warns once (*More info → Run anyway*) and Defender
+            may quarantine the download (*Protection history → Allow*); macOS Gatekeeper wants a
+            right-click → *Open* once. Why, and what is done about it: `docs/code-signing.md`.
 
             **Self-hosting:** `splitter-lxc-${{ env.STAMP }}.tar.gz` (Proxmox LXC / any systemd host, see
             `deploy/lxc/README.md`) or the Docker image `ghcr.io/${{ github.repository }}:${{ env.TAG }}`.
