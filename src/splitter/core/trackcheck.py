@@ -66,3 +66,55 @@ def compare(
             round(mean, 1),
         )
     return TrackCheck("same", "high", "gates match", len(common), round(mean, 1))
+
+
+# Two candidates whose gates are this close to each other's mean distance are
+# indistinguishable from one lap of positions: typically the same layout in
+# two scenes (day / night) or a re-upload, and only the pilot knows which.
+CLOSE_M = 3.0
+
+
+@dataclass(frozen=True)
+class Candidate:
+    """A known track that the run could be on, ranked by ``mean_distance_m``."""
+
+    track_id: int
+    check: TrackCheck
+
+    @property
+    def mean_distance_m(self) -> float:
+        return self.check.mean_distance_m if self.check.mean_distance_m is not None else math.inf
+
+
+def rank(
+    run_gates_per_lap: int | None,
+    run_positions: Mapping[int, Point],
+    tracks: Mapping[int, tuple[int | None, Mapping[int, GatePosition]]],
+) -> list[Candidate]:
+    """Which known tracks does this lap match? Best (closest gates) first.
+
+    ``tracks`` maps track id → (gates per lap, gate positions) as
+    ``repos.track_geometry`` returns them. Only tracks the lap positively
+    matches (same gate count, gates within ``DIFFERENT_M``) are candidates.
+    """
+    out = []
+    for track_id, (count, positions) in tracks.items():
+        check = compare(run_gates_per_lap, run_positions, count, positions)
+        if check.verdict == "same":
+            out.append(Candidate(track_id, check))
+    out.sort(key=lambda c: (c.mean_distance_m, c.track_id))
+    return out
+
+
+def decide(candidates: list[Candidate]) -> Candidate | None:
+    """The one candidate to switch to, or None when it is the pilot's call.
+
+    None when nothing matches, or when the runner-up is within ``CLOSE_M`` of
+    the best (the same layout in another scene: ask, do not guess).
+    """
+    if not candidates:
+        return None
+    best = candidates[0]
+    if len(candidates) > 1 and candidates[1].mean_distance_m - best.mean_distance_m < CLOSE_M:
+        return None
+    return best

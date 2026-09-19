@@ -507,3 +507,24 @@ async def test_getting_started_can_be_hidden_and_remembers_a_connection(
     )
     assert r.status_code == 303
     assert 'id="getting-started"' not in (await client.get("/")).text
+
+
+async def test_getting_started_track_step_stays_done_after_an_unset(client: AsyncClient) -> None:
+    """0.5.1: a track-change unset must not bring the checklist back."""
+    assert "window.SPLITTER_TRACK_EVER_SET = false" in (await client.get("/")).text
+    r = await client.post(
+        "/api/session",
+        json={"track_name": "USADT Champs Trial 01", "track_id": 40001, "scene_id": 16},
+    )
+    assert r.status_code == 200
+    controller = client.app.state.controller  # type: ignore[attr-defined]
+    await controller.clear_session()
+    assert "window.SPLITTER_TRACK_EVER_SET = true" in (await client.get("/")).text
+
+
+async def test_health_link_can_be_hidden_in_the_desktop_shell(client: AsyncClient) -> None:
+    """/healthz is bare JSON and the native window has no back button."""
+    html = (await client.get("/")).text
+    assert 'id="link-health"' in html
+    css = (await client.get("/static/app.css")).text
+    assert "html.desktop #link-health { display:none; }" in css

@@ -60,10 +60,11 @@
   // once and a track is picked; never while a run is on.
   function renderGettingStarted() {
     var card = $("getting-started"); if (!card) return;
-    var steps = { "gs-host": !!window.SPLITTER_GAME_HOST_SET, "gs-game": state.connected || !!window.SPLITTER_EVER_CONNECTED, "gs-track": !!(state.session && state.session.known) };
+    var steps = { "gs-host": !!window.SPLITTER_GAME_HOST_SET, "gs-game": state.connected || !!window.SPLITTER_EVER_CONNECTED, "gs-track": !!(state.session && state.session.known) || !!window.SPLITTER_TRACK_EVER_SET };
     var all = true;
     Object.keys(steps).forEach(function (id) { var li = $(id); if (li) li.classList.toggle("done", steps[id]); if (!steps[id]) all = false; });
     if (state.connected) { window.SPLITTER_GAME_HOST_SET = true; window.SPLITTER_EVER_CONNECTED = true; }
+    if (state.session && state.session.known) window.SPLITTER_TRACK_EVER_SET = true;
     var busy = state.phase === "racing" || state.phase === "countdown" || state.phase === "armed";
     card.hidden = all || busy;
   }
@@ -237,13 +238,41 @@
   };
 
   // ── "did you change tracks?" ──────────────────────────────────
+  // After lap 1 the server compares the run with the session's track. Three
+  // outcomes: switched (it recognised another track: notice only), unset (it
+  // could not tell: modal, with any close matches as one-tap picks), or a
+  // geometry doubt (modal, track kept).
   var tcDlg = $("track-check-dialog"), pendingApply = 0, lastCheck = null;
+  function trackBody(t, applyTo) {
+    var s = (lastCheck && lastCheck.track) || state.session || {};
+    return { track_name: t.track_name, scenery: t.scenery || "", quad_type: s.quad_type || "", quad_size: s.quad_size || "", race_laps: s.race_laps || 0, track_id: t.track_id, scene_id: t.scene_id || 0, track_source: t.track_source || "", quad_model_id: s.quad_model_id || 0, quad_class_id: s.quad_class_id || 0, apply_to_race_id: applyTo || 0 };
+  }
+  function postSession(body, okMsg, errMsg) {
+    return fetch("/api/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(function (r) { if (!r.ok) throw new Error(errMsg); toast(okMsg, "ok"); })
+      .catch(function (e) { toast(e.message, "bad"); });
+  }
   function showTrackCheck(d) {
     if (!d || d.verdict !== "different" || (lastCheck && lastCheck.race_id === d.race_id)) return;
     lastCheck = d;
     var name = (d.track && d.track.track_name) || "the selected track";
+    if (d.switched) {
+      var sw = d.switched, dist = sw.mean_distance_m != null ? " (" + sw.gates_compared + " gates within " + Math.round(sw.mean_distance_m) + " m)" : "";
+      $("track-switched-text").textContent = "Track switched to " + sw.track_name + (sw.scenery ? " · " + sw.scenery : "") + " — this run's gates match it" + dist + ", not " + name + ". The run and its PB check now count for " + sw.track_name + ".";
+      $("track-switched").hidden = false;
+      toast("Track switched to " + sw.track_name, "ok");
+      return;
+    }
     $("track-check-text").textContent = "This run (#" + d.race_id + ") does not look like " + name + ": " + d.reason + "." +
       (d.unset ? " The track has been unset and this run will not count as a PB until you pick one." : " It is still recorded against " + name + ".");
+    var list = $("track-check-candidates").querySelector(".candidate-list"); list.innerHTML = "";
+    (d.candidates || []).forEach(function (c) {
+      var b = document.createElement("button"); b.type = "button"; b.className = "btn";
+      b.textContent = c.track_name + (c.scenery ? " · " + c.scenery : "") + (c.mean_distance_m != null ? " — gates within " + Math.round(c.mean_distance_m) + " m" : "");
+      b.onclick = function () { tcDlg.close(); postSession(trackBody(c, d.race_id), "Track set: " + c.track_name, "could not set the track"); };
+      list.appendChild(b);
+    });
+    $("track-check-candidates").hidden = !(d.candidates && d.candidates.length);
     if (!tcDlg.open) tcDlg.showModal();
   }
   $("track-check-pick").onclick = function () { tcDlg.close(); pendingApply = lastCheck ? lastCheck.race_id : 0; $("btn-session").onclick(); };
@@ -251,11 +280,10 @@
     tcDlg.close();
     if (!lastCheck || !lastCheck.unset || !lastCheck.track) return;
     var t = lastCheck.track;
-    var body = { track_name: t.track_name, scenery: t.scenery, quad_type: t.quad_type, quad_size: t.quad_size, race_laps: t.race_laps || 0, track_id: t.track_id, scene_id: t.scene_id, track_source: t.track_source || "", quad_model_id: t.quad_model_id || 0, quad_class_id: t.quad_class_id || 0, apply_to_race_id: lastCheck.race_id };
-    fetch("/api/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
-      .then(function (r) { if (!r.ok) throw new Error("could not restore the track"); toast("Track kept: " + t.track_name, "ok"); })
-      .catch(function (e) { toast(e.message, "bad"); });
+    postSession(trackBody(t, lastCheck.race_id), "Track kept: " + t.track_name, "could not restore the track");
   };
+  $("track-switched-dismiss").onclick = function () { $("track-switched").hidden = true; };
+  $("track-switched-pick").onclick = function () { $("track-switched").hidden = true; pendingApply = lastCheck ? lastCheck.race_id : 0; $("btn-session").onclick(); };
 
   // ── session dialog ────────────────────────────────────────────
   var dlg = $("session-dialog");

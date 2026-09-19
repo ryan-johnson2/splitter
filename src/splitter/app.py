@@ -64,6 +64,9 @@ def create_app(config: Config | None = None) -> FastAPI:
             pruned = await repos.prune_event_log(session, settings.get_int("event_log_keep"))
             if pruned:
                 log.info("pruned %d old event log rows", pruned)
+            if settings.get("last_track_name") and not settings.get_bool("track_ever_set"):
+                # Installs from before the flag existed: a sticky track counts as picked.
+                await settings.set(session, "track_ever_set", "1")
             if cfg.desktop and not settings.get("game_host"):
                 # Same PC as the game, which listens on the LAN address, never loopback.
                 guess = netinfo.default_route_ipv4()

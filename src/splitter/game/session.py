@@ -10,6 +10,7 @@ from splitter.util import utcnow
 SOURCE_GAME = "game"  # the game's `session` event (multiplayer room created here)
 SOURCE_STICKY = "sticky"  # reused from the previous run
 SOURCE_MANUAL = "manual"  # entered on the tablet
+SOURCE_MATCHED = "matched"  # a run's gates matched a known track (core/trackcheck)
 
 
 @dataclass

@@ -22,6 +22,9 @@ DEFAULTS: dict[str, str] = {
     # First-run checklist on the live page; game_ever_connected flips once.
     "show_getting_started": "1",
     "game_ever_connected": "0",
+    # ...and so does track_ever_set: the "pick the track" step stays ticked
+    # even after a track-change check unsets the session.
+    "track_ever_set": "0",
     # IMU trace: keep it, and at what rate (the game sends 60 Hz).
     "telemetry_enabled": "1",
     "telemetry_store_hz": "20",

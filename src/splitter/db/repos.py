@@ -408,3 +408,51 @@ async def track_geometry(
         ]
         runs.append((trace, crossings))
     return count, gate_positions(runs)
+
+
+@dataclass(frozen=True)
+class KnownTrack:
+    """A track with traced runs on file, named as its most recent run named it."""
+
+    track_id: int
+    track_name: str
+    scenery: str
+    scene_id: int
+    track_source: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "track_id": self.track_id,
+            "track_name": self.track_name,
+            "scenery": self.scenery,
+            "scene_id": self.scene_id,
+            "track_source": self.track_source,
+        }
+
+
+async def tracks_with_gate_count(
+    session: AsyncSession, gates_per_lap: int, exclude_track_id: int = 0
+) -> list[KnownTrack]:
+    """Identified tracks that have a finished traced run with this many gates per lap.
+
+    The cheap pre-filter before comparing geometry: a lap with N gates can only
+    be a track whose laps have N gates.
+    """
+    stmt = (
+        select(Race)
+        .where(
+            (Race.track_id > 0)
+            & (Race.track_id != exclude_track_id)
+            & (Race.status == "finished")
+            & (Race.telemetry_samples > 0)
+            & (Race.gates_per_lap == gates_per_lap)
+        )
+        .order_by(Race.id.desc())
+    )
+    out: dict[int, KnownTrack] = {}
+    for r in (await session.execute(stmt)).scalars():
+        if r.track_id not in out:
+            out[r.track_id] = KnownTrack(
+                r.track_id, r.track_name, r.scenery, r.scene_id, r.track_source
+            )
+    return list(out.values())

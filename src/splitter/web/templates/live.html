@@ -17,6 +17,13 @@
   </span>
 </div>
 
+<div class="flash notice track-switched" id="track-switched" hidden>
+  <span id="track-switched-text"></span>
+  <span class="actions">
+    <button type="button" class="btn sm" id="track-switched-pick">Not right? Pick the track…</button>
+    <button type="button" class="btn sm" id="track-switched-dismiss">OK</button>
+  </span>
+</div>
 
 {% if show_getting_started %}
 <div class="card" id="getting-started" hidden>
@@ -101,6 +108,10 @@
 <dialog id="track-check-dialog">
   <h2>Did you change tracks?</h2>
   <p id="track-check-text"></p>
+  <div id="track-check-candidates" hidden>
+    <p class="help small">It looks like one of these — tap the one you are flying:</p>
+    <div class="candidate-list"></div>
+  </div>
   <div class="form-actions">
     <button type="button" class="primary" id="track-check-pick">Pick the track…</button>
     <button type="button" class="btn" id="track-check-same">No, same track</button>
@@ -110,7 +121,7 @@
 <div class="toast-wrap" id="toasts"></div>
 {% endblock %}
 {% block scripts %}
-<script>window.SPLITTER_SNAPSHOT = {{ snapshot | tojson }}; window.SPLITTER_GAME_HOST_SET = {{ game_host_set | tojson }}; window.SPLITTER_EVER_CONNECTED = {{ game_ever_connected | tojson }};</script>
+<script>window.SPLITTER_SNAPSHOT = {{ snapshot | tojson }}; window.SPLITTER_GAME_HOST_SET = {{ game_host_set | tojson }}; window.SPLITTER_EVER_CONNECTED = {{ game_ever_connected | tojson }}; window.SPLITTER_TRACK_EVER_SET = {{ track_ever_set | tojson }};</script>
 <script src="/static/picker.js?v={{ app_version }}"></script>
 <script src="/static/live.js?v={{ app_version }}"></script>
 {% endblock %}

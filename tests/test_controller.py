@@ -439,3 +439,122 @@ async def test_a_different_gate_count_unsets_the_track_after_lap_one(
         assert race is not None and race.track_id == 0 and race.track_name == ""
     await controller.handle_event(h.status("abort"))
     assert controller.last_track_check is None
+
+
+async def fly_track(controller: RaceController, gate_dt: list[float], laps: int = 2) -> None:
+    """A traced run on a track with ``len(gate_dt)`` gates per lap.
+
+    Flying along x at 20 m/s and jumping back to the start line every lap, so
+    the gate *timing* fixes the gate positions: the same ``gate_dt`` puts the
+    gates in the same places (same track), a different one puts them elsewhere.
+    """
+    await controller.handle_event(h.status("start"))
+    await controller.handle_event(h.racetype())
+    for n in (3, 2, 1, 0):
+        await controller.handle_event(h.countdown(n))
+    await controller.handle_event(h.ev("FinishGate", {"StartFinishGate": "True"}))
+    events = [(0, 1, 1.0, False)]
+    t = 2.0
+    for lap in range(1, laps + 1):
+        for j, dt in enumerate(gate_dt):
+            events.append((lap, 2 + j, t, False))
+            t += dt
+    events.append((laps, 2 + len(gate_dt), t, True))
+    lap_s = sum(gate_dt)
+    ts = 1_000_000.0
+    for lap, gate, t, fin in events:
+        while ts - 1_000_000.0 < t * 1000:
+            rel = (ts - 1_000_000.0) / 1000 - 2.0  # seconds since the first S/F crossing
+            x = 20 * (rel % lap_s if rel >= 0 else rel)
+            await controller.handle_event(h.imu(ts, x, 0.0, 20.0, 0.0))
+            ts += 1000 / 60
+        await controller.handle_event(h.racedata(lap, gate, t, fin))
+    await controller.handle_event(h.status("race finished"))
+
+
+async def set_track(controller: RaceController, name: str, track_id: int, scene_id: int) -> None:
+    await controller.set_manual_session(
+        name, "Basketball Stadium", "Source One", "5", 2, track_id=track_id, scene_id=scene_id
+    )
+
+
+LOOP_A = [2.0, 2.0, 2.0]  # three gates per lap
+LOOP_B = [1.0, 1.5, 1.0, 2.5]  # four gates per lap, elsewhere
+
+
+async def test_a_recognised_track_switches_the_session_and_the_run(
+    controller: RaceController, hub: LiveHub, session_factory
+) -> None:
+    await set_track(controller, "Loop B", 501, 16)
+    await fly_track(controller, LOOP_B)  # what Loop B's lap looks like
+    await set_track(controller, "Loop A", 500, 29)
+    await fly_track(controller, LOOP_A)
+    q = hub.subscribe()
+    # Session still says Loop A; the pilot went back to Loop B in the game.
+    await fly_track(controller, LOOP_B)
+    msgs = h.drain(q)
+    check = next(m for m in msgs if m["type"] == "track_check")["data"]
+    assert check["verdict"] == "different" and check["confidence"] == "high"
+    assert not check["unset"] and check["switched"]["track_id"] == 501
+    assert check["switched"]["mean_distance_m"] < 1 and check["switched"]["gates_compared"] == 4
+    assert [c["track_id"] for c in check["candidates"]] == [501]
+    # The session moved over (and sticks), the run is on Loop B, the PB race set.
+    assert controller.session.track_id == 501 and controller.session.source == "matched"
+    assert controller.session.quad_type == "Source One" and controller.session.race_laps == 3
+    sessions = [m["data"] for m in msgs if m["type"] == "session"]
+    assert sessions and sessions[-1]["track_id"] == 501
+    async with session_factory() as db:
+        race = await db.get(Race, check["race_id"])
+        assert race is not None and race.track_id == 501 and race.track_name == "Loop B"
+        assert race.session_source == "matched" and race.status == "finished"
+        assert race.reference_race_id == 1 and race.is_best is False  # same time as run #1
+        # Lap-1 splits were re-based on Loop B's PB, so they read as level.
+        gates = (await db.execute(select(GateTime).where(GateTime.race_id == race.id))).scalars()
+        assert {g.split_ms for g in gates} == {0}
+        laps = (await db.execute(select(Lap).where(Lap.race_id == race.id))).scalars()
+        assert {lap.delta_ms for lap in laps} == {0}
+    assert controller.last_track_check is None
+
+
+async def test_two_equally_good_matches_unset_and_ask(
+    controller: RaceController, hub: LiveHub, session_factory
+) -> None:
+    # The same layout in two scenes (day / night): identical geometry.
+    await set_track(controller, "Loop B day", 501, 16)
+    await fly_track(controller, LOOP_B)
+    await set_track(controller, "Loop B night", 502, 17)
+    await fly_track(controller, LOOP_B)
+    await set_track(controller, "Loop A", 500, 29)
+    await fly_track(controller, LOOP_A)
+    q = hub.subscribe()
+    await fly_track(controller, LOOP_B)
+    check = next(m for m in h.drain(q) if m["type"] == "track_check")["data"]
+    assert check["unset"] and check["switched"] is None
+    assert sorted(c["track_id"] for c in check["candidates"]) == [501, 502]
+    assert all(c["mean_distance_m"] < 1 for c in check["candidates"])
+    assert not controller.session.identified
+    async with session_factory() as db:
+        race = await db.get(Race, check["race_id"])
+        assert race is not None and race.track_id == 0
+
+
+async def test_no_match_on_file_unsets_without_candidates(
+    controller: RaceController, hub: LiveHub
+) -> None:
+    await set_track(controller, "Loop A", 500, 29)
+    await fly_track(controller, LOOP_A)
+    q = hub.subscribe()
+    await fly_track(controller, LOOP_B)
+    check = next(m for m in h.drain(q) if m["type"] == "track_check")["data"]
+    assert check["unset"] and check["candidates"] == [] and check["switched"] is None
+    assert not controller.session.identified
+
+
+async def test_track_ever_set_flips_once_and_survives_an_unset(
+    controller: RaceController, settings
+) -> None:
+    assert not settings.get_bool("track_ever_set")
+    await set_track(controller, "Loop A", 500, 29)
+    assert settings.get_bool("track_ever_set")
+    await controller.clear_session()
+    assert not controller.session.known and settings.get_bool("track_ever_set")

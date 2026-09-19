@@ -55,6 +55,10 @@ p.help, .help { color:var(--dim); font-size:.86rem; margin:.15rem 0 0; }
 /* ── flash ── */
 .flash { padding:.6rem .9rem; border-radius:8px; margin-bottom:1rem; border:1px solid; }
 .flash.notice { border-color:var(--ok); color:var(--ok); background:color-mix(in srgb, var(--ok) 12%, transparent); }
+.flash.track-switched { display:flex; align-items:center; gap:.8rem; flex-wrap:wrap; }
+.flash.track-switched .actions { margin-left:auto; display:flex; gap:.5rem; }
+.candidate-list { display:flex; flex-direction:column; gap:.5rem; margin-bottom:1rem; }
+.candidate-list .btn { text-align:left; }
 .flash.error { border-color:var(--bad); color:var(--bad); background:color-mix(in srgb, var(--bad) 12%, transparent); }
 
 /* ── tables ── */
@@ -240,6 +244,8 @@ html.standalone #btn-fullscreen { display:none; }
 html.standalone body { padding-top: env(safe-area-inset-top); }
 /* Native desktop shell: the window has its own controls and nothing to install. */
 html.desktop #btn-fullscreen, html.desktop #btn-install { display:none; }
+/* /healthz is bare JSON and the native shell has no back button. */
+html.desktop #link-health { display:none; }
 details.picker-manual { border:0; padding:0; margin:0 0 .8rem; }
 details.picker-manual summary { font-weight:400; }
 details.picker-manual .inline-form { margin-top:.4rem; }

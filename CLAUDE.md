@@ -173,14 +173,28 @@ to the event log at most once per 5 s.
   lap 1): compares the run's gates-per-lap and lap-1 gate positions (from the
   IMU buffer) with `repos.track_geometry` of the session's track (cached per
   track id, dropped when a run on it finishes). Gate-count mismatch = high
-  confidence → the track is unset (`clear_session`) and the run loses its track
-  id (no PB); geometry ≥ 12 m off over ≥ 4 gates = medium → prompt only. The
-  live page shows "Did you change tracks?": *Pick the track…* opens the picker
-  with "also apply to run #n" (`POST /api/session` `apply_to_race_id`), *No,
-  same track* restores the old session onto the run. Snapshot carries
-  `track_check` so a reloaded page still sees the prompt.
+  confidence; geometry ≥ 12 m off over ≥ 4 gates = medium → prompt only. On
+  any mismatch the lap is also ranked against every identified track with a
+  traced run of that gate count (`repos.tracks_with_gate_count` →
+  `trackcheck.rank`; a candidate = same count, gates within 12 m). **High
+  confidence + one clear winner** (`trackcheck.decide`: runner-up ≥ 3 m worse)
+  → `_switch_track`: session and run move to it (`session_source` `matched`),
+  the PB reference is reloaded and lap-1 splits re-based, the live page shows a
+  dismissable notice with "Not right? Pick the track…". High confidence with
+  no winner (nothing on file, or twins such as the same layout in day/night
+  scenes) → the track is unset (`clear_session`), the run loses its track id
+  (no PB) and the live page asks "Did you change tracks?" with the candidates
+  as one-tap picks, *Pick the track…* (picker with "also apply to run #n",
+  `POST /api/session` `apply_to_race_id`) and *No, same track* (restores the
+  old session onto the run). Snapshot carries `track_check` (`switched`,
+  `candidates`, `unset`) so a reloaded page still sees it.
 - Getting-started card: `show_getting_started` setting (Settings toggle);
-  the game step counts as done once `game_ever_connected` has flipped.
+  the game step counts as done once `game_ever_connected` has flipped and the
+  track step once `track_ever_set` has (flipped by `_persist_session`, and at
+  startup for installs that already had a sticky track), so a track-change
+  unset does not bring the card back.
+- Desktop hides the footer *health* link (`html.desktop #link-health`): bare
+  JSON in a window with no back button.
 
 ## Wire facts to remember
 

@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from velocidrone_ws import (
     CountdownEvent,
@@ -47,7 +48,13 @@ from splitter.db import repos
 from splitter.db.models import GateTime, Lap, Race, TelemetrySample
 from splitter.db.runtime_settings import RuntimeSettings
 from splitter.game.catalog import TrackRef
-from splitter.game.session import SOURCE_GAME, SOURCE_MANUAL, SOURCE_STICKY, SessionState
+from splitter.game.session import (
+    SOURCE_GAME,
+    SOURCE_MANUAL,
+    SOURCE_MATCHED,
+    SOURCE_STICKY,
+    SessionState,
+)
 from splitter.live.hub import LiveHub
 from splitter.util import utcnow
 
@@ -659,8 +666,12 @@ class RaceController:
 
         Single player never names the track, so a pilot who switched tracks in
         the game would record runs and PBs against the old one. A gate-count
-        mismatch is certain: the track is unset and this run loses its track id
-        (no PB). A geometry mismatch only asks; the live page shows a prompt.
+        mismatch is certain, and then the lap is matched against every track
+        with traced runs on file: one clear match and the session (and this
+        run) switch to it with a notice; several equally good matches (the
+        same layout in another scene) or none, and the track is unset and the
+        pilot is asked. A geometry mismatch only asks; the live page shows a
+        prompt, with the matches as quick picks.
         """
         s, tracker, race_id = self.session, self.tracker, self.race_id
         if tracker is None or race_id is None or not s.identified:
@@ -687,6 +698,8 @@ class RaceController:
             "gates_compared": check.gates_compared,
             "track": s.to_dict(),
             "unset": False,
+            "switched": None,
+            "candidates": [],
         }
         if check.verdict != "different":
             return
@@ -697,19 +710,119 @@ class RaceController:
             check.confidence,
             check.reason,
         )
+        candidates = await self._match_known_tracks(
+            tracker.gates_per_lap, run_positions, s.track_id
+        )
+        self.last_track_check["candidates"] = [
+            known.to_dict() | {"mean_distance_m": c.check.mean_distance_m}
+            for known, c in candidates
+        ]
         if check.confidence == "high":
-            self.last_track_check["unset"] = True
-            async with self._sf() as db:
-                race = await db.get(Race, race_id)
-                if race is not None:
-                    race.track_id = 0
-                    race.track_name = ""
-                    race.scenery = ""
-                    race.scene_id = 0
-                    race.track_source = ""
-                    await db.commit()
-            await self.clear_session()
+            pick = trackcheck.decide([c for _, c in candidates])
+            if pick is not None:
+                known = next(k for k, c in candidates if c is pick)
+                await self._switch_track(known, race_id, pick)
+            else:
+                self.last_track_check["unset"] = True
+                async with self._sf() as db:
+                    race = await db.get(Race, race_id)
+                    if race is not None:
+                        race.track_id = 0
+                        race.track_name = ""
+                        race.scenery = ""
+                        race.scene_id = 0
+                        race.track_source = ""
+                        await db.commit()
+                await self.clear_session()
         self._hub.broadcast("track_check", self.last_track_check)
+
+    async def _match_known_tracks(
+        self, gates_per_lap: int | None, run_positions: dict[int, geometry.Point], exclude: int
+    ) -> list[tuple[repos.KnownTrack, trackcheck.Candidate]]:
+        """Every track on file whose laps look like this one, best first."""
+        if not gates_per_lap:
+            return []
+        async with self._sf() as db:
+            known = await repos.tracks_with_gate_count(db, gates_per_lap, exclude)
+        by_id = {k.track_id: k for k in known}
+        geometries: dict[int, tuple[int | None, dict[int, GatePosition]]] = {}
+        for track_id in by_id:
+            g = await self._track_geometry(track_id)
+            if g is not None:
+                geometries[track_id] = g
+        ranked = trackcheck.rank(gates_per_lap, run_positions, geometries)
+        return [(by_id[c.track_id], c) for c in ranked]
+
+    async def _switch_track(
+        self, known: repos.KnownTrack, race_id: int, match: trackcheck.Candidate
+    ) -> None:
+        """This run is on ``known``, not the session's track: move both over.
+
+        The PB reference follows the new track, and the splits already stored
+        for lap 1 are re-based on it so the run reads consistently afterwards.
+        """
+        old = self.session
+        self.session = SessionState(
+            track_name=known.track_name,
+            scenery=known.scenery,
+            track_id=known.track_id,
+            scene_id=known.scene_id,
+            track_source=known.track_source,
+            quad_type=old.quad_type,
+            quad_size=old.quad_size,
+            quad_model_id=old.quad_model_id,
+            quad_class_id=old.quad_class_id,
+            race_mode=old.race_mode,
+            race_format=old.race_format,
+            race_laps=old.race_laps,
+            player_name=old.player_name,
+            source=SOURCE_MATCHED,
+        )
+        s = self.session
+        async with self._sf() as db:
+            self.reference = await repos.load_reference(
+                db, repos.PBKey(s.track_id, s.quad_model_id, s.race_laps)
+            )
+            race = await repos.update_race(
+                db,
+                race_id,
+                track_id=s.track_id,
+                track_name=s.track_name,
+                scenery=s.scenery,
+                scene_id=s.scene_id,
+                track_source=s.track_source,
+                session_source=SOURCE_MATCHED,
+                reference_race_id=self.reference.race_id if self.reference else None,
+            )
+            if race is not None:
+                await self._rebase_splits(db, race_id)
+        await self._persist_session()
+        log.warning(
+            "race %d switched from %r to %r: %s (%d gates)",
+            race_id,
+            old.track_name,
+            s.track_name,
+            match.check.reason,
+            match.check.gates_compared,
+        )
+        assert self.last_track_check is not None
+        self.last_track_check["switched"] = s.to_dict() | {
+            "mean_distance_m": match.check.mean_distance_m,
+            "gates_compared": match.check.gates_compared,
+        }
+        self._hub.broadcast("session", s.to_dict())
+        self._hub.broadcast("reference", self._reference_dict())
+
+    async def _rebase_splits(self, db: AsyncSession, race_id: int) -> None:
+        """Recompute the stored PB deltas of the current run against ``self.reference``."""
+        ref = self.reference
+        rows = (await db.execute(select(GateTime).where(GateTime.race_id == race_id))).scalars()
+        for g in rows:
+            g.split_ms = ref.split_at(g.seq, g.cumulative_ms) if ref else None
+        laps = (await db.execute(select(Lap).where(Lap.race_id == race_id))).scalars()
+        for lap in laps:
+            lap.delta_ms = ref.lap_delta(lap.lap, lap.lap_ms) if ref else None
+        await db.commit()
 
     async def _finish_race(self, aborted: bool) -> None:
         race_id, tracker = self.race_id, self.tracker
@@ -874,6 +987,8 @@ class RaceController:
                     "last_race_laps": str(s.race_laps),
                 },
             )
+            if s.known and not self._settings.get_bool("track_ever_set"):
+                await self._settings.set(db, "track_ever_set", "1")
 
     async def _log_event(self, event: Event) -> None:
         if not self._settings.get_bool("event_log_enabled"):

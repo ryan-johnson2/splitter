@@ -40,3 +40,35 @@ def test_too_few_gates_or_no_reference_is_unknown() -> None:
     assert trackcheck.compare(5, {}, None, {}).verdict == "unknown"
     # Unknown gate count on either side does not trigger the count rule.
     assert trackcheck.compare(None, {}, 5, {}).verdict == "unknown"
+
+
+SHIFTED = {k: (x + 40.0, y, z + 30.0) for k, (x, y, z) in SQUARE.items()}
+
+
+def test_rank_keeps_only_matching_tracks_closest_first() -> None:
+    run = {k: (x + 1.0, y, z) for k, (x, y, z) in SQUARE.items()}
+    near = {k: (x + 3.0, y, z + 3.0) for k, (x, y, z) in SQUARE.items()}
+    tracks = {
+        10: (5, ref(SQUARE)),
+        11: (5, ref(near)),
+        12: (5, ref(SHIFTED)),  # far away
+        13: (7, ref(SQUARE)),  # wrong gate count
+        14: (None, {}),  # nothing known
+    }
+    ranked = trackcheck.rank(5, run, tracks)
+    assert [c.track_id for c in ranked] == [10, 11]
+    assert ranked[0].mean_distance_m < ranked[1].mean_distance_m
+
+
+def test_decide_switches_only_when_one_track_stands_out() -> None:
+    run = {k: (x + 1.0, y, z) for k, (x, y, z) in SQUARE.items()}
+    far = {k: (x + 8.0, y, z) for k, (x, y, z) in SQUARE.items()}
+    assert trackcheck.decide([]) is None
+    alone = trackcheck.rank(5, run, {10: (5, ref(SQUARE))})
+    assert trackcheck.decide(alone) is not None and alone[0].track_id == 10
+    clear = trackcheck.rank(5, run, {10: (5, ref(SQUARE)), 11: (5, ref(far))})
+    picked = trackcheck.decide(clear)
+    assert picked is not None and picked.track_id == 10
+    # Same layout in two scenes: identical geometry, so it is the pilot's call.
+    twins = trackcheck.rank(5, run, {10: (5, ref(SQUARE)), 11: (5, ref(SQUARE))})
+    assert len(twins) == 2 and trackcheck.decide(twins) is None
