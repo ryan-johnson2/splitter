@@ -78,7 +78,7 @@ def main() -> None:
         raise SystemExit(f"expected {exe}")
     archive = pack(folder, dist / "splitter-sidecar.tar.gz")
     size = sum(f.stat().st_size for f in folder.rglob("*") if f.is_file())
-    print(f"sidecar built: {folder} ({size // 1_000_000} MB unpacked) → "
+    print(f"sidecar built: {folder} ({size // 1_000_000} MB unpacked) -> "
           f"{archive} ({archive.stat().st_size // 1_000_000} MB)", flush=True)
 
 
