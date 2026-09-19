@@ -19,8 +19,12 @@ splitter.service   # the systemd unit
 
 ```sh
 deploy/lxc/build-bundle.sh
-# -> deploy/lxc/dist/splitter-lxc-0.1.0.tar.gz
+# -> deploy/lxc/dist/splitter-lxc-<version>.tar.gz
 ```
+
+Or skip the build and take `splitter-lxc-<version>.tar.gz` from the
+[GitHub Release](../../../../releases/latest): the release bundles also carry
+the private online track picker client, which a local build does not have.
 
 Wheels are built inside a `python:3.12-slim` container when Docker is available
 (nothing Python-related is needed on the host). `dist/` is gitignored.
@@ -44,8 +48,9 @@ be able to reach the gaming PC's LAN IP on TCP 60003 (same VLAN, or a route).
 ## 3. Install
 
 ```sh
-pct push 111 deploy/lxc/dist/splitter-lxc-0.1.0.tar.gz /root/splitter-lxc-0.1.0.tar.gz
-pct exec 111 -- bash -c 'cd /root && tar xzf splitter-lxc-0.1.0.tar.gz && cd splitter-lxc-0.1.0 && ./install.sh'
+V=0.5.1
+pct push 111 deploy/lxc/dist/splitter-lxc-$V.tar.gz /root/splitter-lxc-$V.tar.gz
+pct exec 111 -- bash -c "cd /root && tar xzf splitter-lxc-$V.tar.gz && cd splitter-lxc-$V && ./install.sh"
 ```
 
 The installer creates a `splitter` system user, a venv at `/opt/splitter/venv`,
@@ -69,10 +74,13 @@ Re-running the installer is the upgrade. It keeps the env file and database,
 replaces the wheels and restarts the unit:
 
 ```sh
-deploy/lxc/build-bundle.sh
-pct push 111 deploy/lxc/dist/splitter-lxc-0.2.0.tar.gz /root/splitter-lxc-0.2.0.tar.gz
-pct exec 111 -- bash -c 'cd /root && tar xzf splitter-lxc-0.2.0.tar.gz && cd splitter-lxc-0.2.0 && ./install.sh'
+V=0.5.1   # the new version
+pct push 111 deploy/lxc/dist/splitter-lxc-$V.tar.gz /root/splitter-lxc-$V.tar.gz
+pct exec 111 -- bash -c "cd /root && tar xzf splitter-lxc-$V.tar.gz && cd splitter-lxc-$V && ./install.sh"
 ```
+
+Do not upgrade while a run is on: the restart cuts it. `/api/state` shows
+`"race": null` when it is safe.
 
 The schema is `create_all` at startup plus automatic `ADD COLUMN` for new
 nullable/defaulted columns, so additive upgrades are safe. Snapshot the CT
@@ -99,15 +107,17 @@ Caddy in front of Splitter with a certificate from Caddy's **internal CA**,
 keeping plain http as well:
 
 ```sh
-pct push 112 deploy/lxc/caddy/Caddyfile /root/Caddyfile   # or scp the caddy/ dir
-./install-caddy.sh                                          # inside the container
+scp -r deploy/lxc/caddy root@<container>:/root/caddy
+./caddy/install-caddy.sh splitter.lan.example   # inside the container; default: hostname -f
 ```
 
-It serves the CA root at `http://splitter.home.ntninja.com/splitter-ca.crt`
-(also `/root/splitter-ca.crt`). Install that once on the tablet (Android: Settings → Security → Encryption & credentials → Install a
-certificate → CA certificate; iPadOS: open the file, then Settings → General →
-VPN & Device Management → install, and Settings → General → About →
-Certificate Trust Settings → enable). After that `https://splitter.home.ntninja.com/`
-is trusted, Chrome offers **Install app**, and the service worker keeps the
-pages available if the server blips. iPadOS also does "Add to Home Screen" over
-plain http, without the certificate.
+The name you pass is what the certificate is issued for, so open Splitter by
+that name (give it a DNS entry or a static lease on your router). It serves the
+CA root at `http://<that name>/splitter-ca.crt` (also `/root/splitter-ca.crt`).
+Install that once on the tablet (Android: Settings → Security → Encryption &
+credentials → Install a certificate → CA certificate; iPadOS: open the file,
+then Settings → General → VPN & Device Management → install, and Settings →
+General → About → Certificate Trust Settings → enable). After that
+`https://<that name>/` is trusted, Chrome offers **Install app**, and the
+service worker keeps the pages available if the server blips. iPadOS also does
+"Add to Home Screen" over plain http, without the certificate.

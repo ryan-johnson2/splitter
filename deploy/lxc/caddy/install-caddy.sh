@@ -3,10 +3,14 @@
 # Put Caddy in front of Splitter on the LXC: https (internal CA) + http on the
 # standard ports, Splitter itself moved to loopback:8100. Idempotent.
 #
-#     ./install-caddy.sh            # run as root inside the container
+#     ./install-caddy.sh [hostname]   # run as root inside the container
+#
+# The hostname (default: `hostname -f`) is the name the https certificate is
+# issued for; open Splitter by that name on the tablet.
 #
 set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+HOST="${1:-$(hostname -f 2>/dev/null || hostname)}"
 say() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 [[ $EUID -eq 0 ]] || { echo "run as root" >&2; exit 1; }
 
@@ -21,8 +25,9 @@ sed -i 's/^HOST=.*/HOST=127.0.0.1/; s/^PORT=.*/PORT=8100/' /etc/splitter/splitte
 grep -q '^HOST=' /etc/splitter/splitter.env || echo 'HOST=127.0.0.1' >> /etc/splitter/splitter.env
 grep -q '^PORT=' /etc/splitter/splitter.env || echo 'PORT=8100' >> /etc/splitter/splitter.env
 
-say "installing Caddyfile"
-install -o root -g root -m 0644 "$SCRIPT_DIR/Caddyfile" /etc/caddy/Caddyfile
+say "installing Caddyfile for $HOST"
+sed "s/__HOST__/$HOST/g" "$SCRIPT_DIR/Caddyfile" > /etc/caddy/Caddyfile
+chown root:root /etc/caddy/Caddyfile && chmod 0644 /etc/caddy/Caddyfile
 caddy validate --config /etc/caddy/Caddyfile >/dev/null
 
 systemctl restart splitter
@@ -35,5 +40,5 @@ if [[ -f "$ROOT" ]]; then
     install -d -o root -g root -m 0755 /etc/caddy/public
     install -o root -g root -m 0644 "$ROOT" /etc/caddy/public/splitter-ca.crt
     cp "$ROOT" /root/splitter-ca.crt
-    say "CA root at http://splitter.home.ntninja.com/splitter-ca.crt — install it on the tablet, then open https://splitter.home.ntninja.com/"
+    say "CA root at http://$HOST/splitter-ca.crt — install it on the tablet, then open https://$HOST/"
 fi

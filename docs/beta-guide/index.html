@@ -45,7 +45,7 @@
 
 <h2>1. Start Splitter</h2>
 <ol class="steps">
-  <li><span class="ui">Make a folder</span> for it, for example <code>Documents\Splitter</code>, and put <code>splitter-windows-x64.exe</code> inside. Splitter keeps all your runs in a <code>splitter-data</code> folder that appears next to the exe, so keep the two together.</li>
+  <li><span class="ui">Download</span> <code>splitter-windows-x64.exe</code> from the latest release at <code>github.com/ryan-johnson2/splitter/releases</code>. <span class="ui">Make a folder</span> for it, for example <code>Documents\Splitter</code>, and put the exe inside. Splitter keeps all your runs in a <code>splitter-data</code> folder that appears next to the exe, so keep the two together.</li>
   <li><span class="ui">Double-click the exe.</span> The first launch takes a few seconds while it unpacks.</li>
   <li>If Windows shows <span class="ui">“Windows protected your PC”</span>, click <span class="ui">More info</span>, then <span class="ui">Run anyway</span>. The beta is not code-signed yet, which is all that warning means.</li>
   <li>Because it is not signed, <span class="ui">Microsoft Defender</span> may also flag or remove the exe when you copy or download it. If it does, open <span class="ui">Windows Security → Virus &amp; threat protection → Protection history</span>, find the Splitter entry, choose <span class="ui">Actions → Allow</span>, then <span class="ui">copy the exe into the folder again</span>. It should stay put after that.</li>
@@ -89,6 +89,7 @@
 <h2>4. Fly</h2>
 <ol class="steps">
   <li>On the <span class="ui">Live</span> page tap <span class="ui">Track…</span> and search for the track you are about to fly, then pick it. The game never says which track you are on in single player, so this is how Splitter knows. It remembers your pick until you change it.</li>
+  <li>Switched tracks in the game and forgot to change it here? After your first lap Splitter checks the run against the track it has on record. If it recognises another track you have flown before, it switches for you and shows a note (with a button in case it guessed wrong). If it cannot tell, it asks you to pick.</li>
   <li>Start a race in the game as normal. Splitter shows the countdown, then the race clock.</li>
   <li>The big clock is coloured by how you are doing against your personal best on that track: <span style="color:#10b981;font-weight:600">green</span> ahead, <span style="color:#f59e0b;font-weight:600">yellow</span> close, <span style="color:#ef4444;font-weight:600">red</span> behind. Each gate you pass adds a line to the gate log with the split.</li>
   <li>When you finish, the result card shows your laps and whether it was a new personal best.</li>
@@ -116,7 +117,7 @@
 <p>While the Splitter window is open, any phone or tablet on the same Wi-Fi can open <code>http://YOUR-PC-ADDRESS:8100/</code> in its browser, using the address from step 3, for example <code>http://192.168.1.23:8100/</code>. The Live page has a fullscreen button that hides everything but the clock. This needs the firewall permission from step 1.</p>
 
 <h2>7. When something goes wrong</h2>
-<p>This is a beta, so please tell me about anything odd. The most useful report has three things:</p>
+<p>This is a beta, so please tell me about anything odd, here or as an issue at <code>github.com/ryan-johnson2/splitter/issues</code>. The most useful report has three things:</p>
 <ul>
   <li><b>What you did and what you expected</b>, in a sentence or two.</li>
   <li><b>A screenshot</b> of the Splitter page, if it looks wrong.</li>
@@ -125,12 +126,12 @@
 <h3>Known limits in this beta</h3>
 <ul>
   <li>The exe is not code-signed, so Windows warns on first run and Defender may flag it (section 1).</li>
-  <li>In single player you must pick the track yourself (step 4). Hosted multiplayer rooms report it automatically.</li>
+  <li>In single player you must pick the track yourself (step 4); Splitter can only recognise a track it has already seen you fly. Hosted multiplayer rooms report it automatically.</li>
   <li>Something not obvious? Tap the thing that looks wrong: the header dots, the <span class="ui">?</span> next to Track…, and the “no id” tag all open a short help note.</li>
   <li>Speed, flight path and crash detection need <span class="ui">Websocket IMU Data</span> on and the Betaflight flight controller model.</li>
   <li>Closing the Splitter window stops the timer. Runs already saved are kept in <code>splitter-data</code>.</li>
 </ul>
 
-<p class="foot">Splitter 0.4.0 beta · September 2026</p>
+<p class="foot">Splitter 0.5.1 beta · September 2026</p>
 </body>
 </html>

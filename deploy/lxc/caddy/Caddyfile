@@ -1,4 +1,5 @@
-# Splitter behind Caddy on the LXC (deploy/lxc/caddy/install-caddy.sh).
+# Splitter behind Caddy on the LXC. Template: install-caddy.sh replaces
+# __HOST__ with the box's hostname (its argument, else `hostname -f`).
 #
 # https with a certificate from Caddy's own internal CA — the box has no
 # public DNS name, so Let's Encrypt is not an option. Install the CA root
@@ -11,13 +12,14 @@
 	auto_https disable_redirects
 }
 
-splitter.home.ntninja.com, splitter {
+__HOST__, splitter {
 	tls internal
 	reverse_proxy 127.0.0.1:8100
 	encode gzip
 }
 
-http://splitter.home.ntninja.com, http://splitter, http://192.168.38.101 {
+# Plain http for any name or address the box answers to.
+http:// {
 	# The CA root, downloadable from the tablet over plain http.
 	handle /splitter-ca.crt {
 		root * /etc/caddy/public

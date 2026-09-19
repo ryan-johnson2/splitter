@@ -6,6 +6,7 @@ build-backend = "hatchling.build"
 name = "splitter"
 version = "0.5.1"
 description = "Splitter — personal VelociDrone lap timer: gate-by-gate splits, telemetry and analysis"
+license = {text = "AGPL-3.0-or-later"}
 requires-python = ">=3.11"
 dependencies = [
     "velocidrone-ws",

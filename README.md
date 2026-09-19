@@ -5,13 +5,20 @@ fly. It waits for the race to start, logs every gate crossing with the split
 against your personal best, records the IMU telemetry, and keeps everything
 for analysis later.
 
+**Beta.** It works, it is used every week, and it is early: the binaries are
+unsigned and rough edges remain. Problems and ideas go in
+[issues](../../issues); the [quick-start guide](docs/beta-guide/index.html)
+([PDF](docs/beta-guide/Splitter-beta-quick-start.pdf)) is the ten-minute
+walkthrough for Windows.
+
 - **Live**: race clock, current lap, split vs PB at every gate, last lap and
   its delta, live speed, rolling gate log, result card with per-lap deltas.
 - **Races**: every run with track, quad, time, delta vs PB; per-race laps,
   gates (segment and cumulative vs the current PB), top-down flight path
   coloured by speed, speed-over-time with gate ticks; edit or bulk-fix runs.
-- **Tracks**: PB, best lap, progression chart, gate consistency (best / median /
-  worst / PB-run segment per gate) and the theoretical best.
+- **Tracks**: PB, best lap, progression chart, sections (where the time is
+  on the table, consistency, crashes, a verdict per section), the top-down
+  map, gate consistency and the theoretical best.
 - **Protocol**: the raw frames the game sent, for figuring out what a game
   mode actually emits.
 
@@ -41,11 +48,12 @@ Communication* and, for telemetry, *Websocket IMU*.
 
 Single player never sends the track name over the websocket, so on the live
 page tap **Track…** once to say what you're flying; it sticks until you change
-it or host a room (hosting sends a full session).
+it or host a room (hosting sends a full session). Forgot to change it? After
+the first lap Splitter compares the run's gates with what it knows about that
+track: when it recognises another track you have flown it switches for you and
+says so; when it cannot tell, it asks.
 
 No game handy? `splitter fake-game --loop` serves a scripted one on port 60003.
-
-Long-term hosting on Proxmox: see `deploy/lxc/README.md`.
 
 ## What is not in this repo
 
@@ -59,7 +67,9 @@ telemetry, analysis, the websocket client under `libs/velocidrone-ws` — is her
 
 ## Developing
 
-Tests, lint and types run in a container (nothing is installed on the host):
+`CLAUDE.md` is the architecture and design notes (it doubles as the brief
+for AI-assisted work on the repo). Tests, lint and types run in a container
+(nothing is installed on the host):
 
 ```sh
 docker compose --profile dev build test
@@ -69,3 +79,8 @@ docker compose --profile dev run --rm test mypy src
 ```
 
 Or natively: `pip install -e libs/velocidrone-ws -e . pytest pytest-asyncio httpx ruff mypy`.
+
+## License
+
+[AGPL-3.0-or-later](LICENSE), the whole tree including the vendored
+`libs/velocidrone-ws` client.
