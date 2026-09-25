@@ -1,6 +1,8 @@
 # Design note: capture nodes, a web server, and sync between them
 
-Status: proposal (2026-09-21). Tracked as #10 (umbrella) and #11–#15 on GitHub.
+Status: proposal (2026-09-21, amended 2026-09-25 with map labelling and the
+always-on node). Tracked as #10 (umbrella) and #11–#16 on GitHub. The
+implementation plan is `docs/sync-plan.md`.
 
 ## Why
 
@@ -149,6 +151,55 @@ Limits to state plainly:
   runs the full node with the live page; the difference is a flag, not a
   different program.
 
+### The fingerprint registry and labelling the map
+
+Identification needs somewhere to keep what the web knows about tracks
+that is not "a run that happened to be attributed". That is a
+**fingerprint registry**: one row per known layout (`gates_per_lap`, lap-1
+gate positions), pointing at an online `track_id` (and, for twins, a set of
+`(track_id, scene_id)` pairs). Rows get there two ways:
+
+- **Learned**: a pilot attributes a run on the Races page. The run's
+  fingerprint is copied into the registry for that track, for that pilot.
+- **Labelled**: someone with the admin role labels a *cluster* of unknown
+  fingerprints in the **admin portal**. Labels are global: every user's
+  future runs on that layout identify on arrival.
+
+The admin portal (`/admin/fingerprints`) is a queue of unlabelled clusters, a
+cluster being every unidentified fingerprint within the track-change
+thresholds of each other (12 m over ≥ 4 gates, same gate count). Each cluster
+shows the top-down map the track page already draws, how many runs and how
+many nodes (users) it came from, and first/last seen. The admin picks the
+track with the same online picker the live page uses, optionally the scene,
+and the label is applied to every run in the cluster and to arrivals from
+then on. Clusters can also be merged, split, or marked *not a track*
+(freestyle, practice in a scene with no gates worth ranking). Twins are one
+cluster with several `(track_id, scene_id)` labels; ingest picks the twin
+the pilot flew most recently and flags the run as ambiguous.
+
+Single-user self-hosted: the one user is the admin and the portal is just
+another page. Multi-user: an `is_admin` flag, and the registry is the one
+thing shared across users. It holds anonymous geometry, never runs.
+
+### The node as an always-on service
+
+A headless node is only useful if it is running whenever the game is, which
+on a gaming PC means "since logon, without anyone starting it". The same
+sidecar binary runs both ways; the difference is `--headless`. What is
+missing is the registration:
+
+- **Windows**: a Scheduled Task at logon (`splitter service install`),
+  not a Windows service. No UAC, runs in the user's session, sees the same
+  network as the game, survives reboots. `splitter service remove | status`
+  round it out, and the desktop app's Settings page gets a "Run in the
+  background at logon" toggle that calls the same thing.
+- **Linux / macOS**: a systemd user unit / launchd agent from the same
+  command.
+- The desktop window, when opened while the background node is already
+  running, attaches to it (the `SPLITTER_READY` handshake finds the port
+  from a pidfile in the data dir) instead of starting a second server on
+  the same database.
+
 ### Optional: a relay
 
 A node can hold an *outbound* websocket to the web and mirror its live-hub
@@ -183,6 +234,10 @@ telemetry. Accounts, abuse and being on the hook for uptime are. So:
    endpoint, reference bundle in the upload response and on `GET`. The
    current app is both node and web; a second instance can be the web.
 3. **Headless node.** `splitter node`: bridge + controller + outbox, no
-   templates, one status line. Server-side fingerprint identification and the
-   review queue on the web.
-4. **Relay** (optional), then **multi-user**, then hosting if still wanted.
+   templates, one status line, plus `splitter service install` so it runs
+   from logon. Server-side fingerprint identification against the registry
+   and the review queue on the web.
+4. **Admin portal.** Cluster the unidentified fingerprints, label a cluster
+   to a track, twins and "not a track". On a single-user web this is also
+   where a pilot fixes their own map wholesale instead of run by run.
+5. **Relay** (optional), then **multi-user**, then hosting if still wanted.
