@@ -15,7 +15,7 @@ still has to run the full app with its pages.
 The idea: split it into a **node** that captures and a **web** that stores
 and analyses. A node pushes finished runs up; the web is where every result
 lives and where every analysis page is. A node can be the full app (live
-page on a tablet, as now) or a headless background service with no UI at all.
+page on a tablet, as now) or a background service that nobody ever opens.
 The web can be self-hosted (the existing LXC / Docker deployment) or, later,
 a hosted service.
 
@@ -57,8 +57,9 @@ uploaded to.
 
 What a node stores after this: settings, an **outbox** of unacknowledged
 runs, and a **reference cache**. That, not a smaller telemetry table, is what
-keeps the local database small. A headless node stores even less: it has no
-live page, so it needs no references at all (see "Headless and the map").
+keeps the local database small when local copies are turned off; kept on
+(the default) the columnar telemetry blob already makes a heavy year tens
+of MB.
 
 ## Identity and ordering
 
@@ -79,7 +80,7 @@ Everything about ordering follows from two rules.
 Two things are **historical facts and must not be recomputed** when an older
 run arrives late and turns out to have been the true PB: `reference_race_id`
 and `pb_delta_ms` say what the run was compared against *at the time*. A run
-from a headless node has neither (no reference at GO); the web fills them in
+captured with no reference at GO has neither; the web fills them in
 against the PB as of ingest and marks them `derived`.
 
 The per-node `seq` lets the web say "3 runs still pending from the laptop"
@@ -114,7 +115,7 @@ sample: the `telemetry` table is the bulk of the current database (roughly
 payload. The race page reads it through `repos.telemetry_for_race`, which
 keeps its signature and decodes the blob.
 
-## Headless and the map
+## Nodes nobody watches, and the map
 
 A background service with no UI cannot show the "Track…" dialog, and single
 player never names the track (see CLAUDE.md, "Single player never names the
@@ -133,10 +134,11 @@ track"). Three mechanisms, in order of how much they carry:
    edit exists) and from then on every run with that fingerprint matches.
    On a hosted web with many users the fingerprint set is shared, so a new
    user's runs on any track anyone has flown identify on arrival.
-3. **Node-side sticky as an opt-in.** Carrying the last track over is a
-   guess that silently mis-attributes PBs; on a headless node it is off by
-   default and the review queue is the truth. Hosted multiplayer rooms still
-   name the track (`session` event) and are attributed at capture.
+3. **Node-side sticky stays, but is visible.** Carrying the last track over
+   is a guess that can mis-attribute PBs; with an upstream the web re-checks
+   every run's fingerprint and the review queue shows `session_source`, so a
+   sticky guess is never silent. Hosted multiplayer rooms still name the
+   track (`session` event) and are attributed at capture.
 
 Limits to state plainly:
 
@@ -147,9 +149,9 @@ Limits to state plainly:
 - **Twins** (the same layout in day and night scenes) share a fingerprint.
   Geometry cannot resolve the scene. Attribute to the twin the pilot used
   last, flag it as ambiguous in the queue.
-- A headless node has no live splits, by definition. Anyone who wants splits
-  runs the full node with the live page; the difference is a flag, not a
-  different program.
+- A node that nobody watches has no live splits, by definition. Open the
+  window or the live page on a tablet and they are there; it is the same
+  service either way.
 
 ### The fingerprint registry and labelling the map
 
@@ -181,31 +183,42 @@ Single-user self-hosted: the one user is the admin and the portal is just
 another page. Multi-user: an `is_admin` flag, and the registry is the one
 thing shared across users. It holds anonymous geometry, never runs.
 
-### The node as an always-on service
+### The node is a service; the window is a viewer
 
-A headless node is only useful if it is running whenever the game is, which
-on a gaming PC means "since logon, without anyone starting it". The same
-sidecar binary runs both ways; the difference is `--headless`. What is
-missing is the registration:
+A node is only useful if it is running whenever the game is, which on a
+gaming PC means "since boot, without anyone starting it". So the node is
+installed as a **system service** and the desktop window becomes a viewer
+of it, not the thing that runs it:
 
-- **Windows**: a Scheduled Task at logon (`splitter service install`),
-  not a Windows service. No UAC, runs in the user's session, sees the same
-  network as the game, survives reboots. `splitter service remove | status`
-  round it out, and the desktop app's Settings page gets a "Run in the
-  background at logon" toggle that calls the same thing.
-- **Linux / macOS**: a systemd user unit / launchd agent from the same
-  command.
-- The desktop window, when opened while the background node is already
-  running, attaches to it (the `SPLITTER_READY` handshake finds the port
-  from a pidfile in the data dir) instead of starting a second server on
-  the same database.
+- **Windows**: an installer (Tauri's NSIS bundle, per-machine, UAC) puts the
+  service binary at a stable path under Program Files and registers it with
+  install hooks; upgrades stop, replace and restart it. Data lives in
+  `%ProgramData%\Splitter`; the first run copies a portable install's
+  database across if it finds one. The portable exe stays as a secondary
+  download for a release or two.
+- **Linux / macOS**: the LXC installer already writes a systemd unit; a
+  macOS build gets a launchd daemon from the same `splitter service` command.
+- **The service is the whole app**: bridge, controller, live page, local
+  pages. Serving pages costs nothing, so there is no separate headless
+  build. The window is a webview at the service's port; when the service is
+  not running it says so and offers to start it.
+- **Local-only versus cloud-first is a setting, not an install.** No
+  upstream = today's product, offline, everything local. Upstream set = runs
+  push up, local copies kept by default (a *Remove local copies* button
+  deletes acknowledged runs for a one-off cleanup). A pilot who wants
+  capture only never opens the window.
+- **No IMU, no fingerprint.** Identification depends on telemetry, which is
+  opt-in in the game. The node notices when race data arrives without IMU
+  frames and raises it: a header warning on the live page, an OS
+  notification from the service, and `imu_seen_at` on the web's node list so
+  the review queue can say why a node's runs are unidentified.
 
 ### Optional: a relay
 
 A node can hold an *outbound* websocket to the web and mirror its live-hub
 messages up it, and accept `session` and `abort` commands back down. That
 gives the web a live view and lets the pilot pick the track from the web
-before a headless run. It is the same `LiveHub` fan-out with one more client,
+before a run nobody is watching locally. It is the same `LiveHub` fan-out with one more client,
 and the same `POST /api/session` handler on the node. Nice to have; not
 needed for identification, and it must never be required for a run to
 record.
@@ -233,11 +246,11 @@ telemetry. Accounts, abuse and being on the hook for uptime are. So:
 2. **Push.** `upstream_url` + token settings, outbox with retries, ingest
    endpoint, reference bundle in the upload response and on `GET`. The
    current app is both node and web; a second instance can be the web.
-3. **Headless node.** `splitter node`: bridge + controller + outbox, no
-   templates, one status line, plus `splitter service install` so it runs
-   from logon. Server-side fingerprint identification against the registry
-   and the review queue on the web.
-4. **Admin portal.** Cluster the unidentified fingerprints, label a cluster
-   to a track, twins and "not a track". On a single-user web this is also
-   where a pilot fixes their own map wholesale instead of run by run.
+3. **Service install and identification.** The node runs as a system
+   service from an installer; the window attaches to it. Server-side
+   fingerprint identification against the registry and the review queue on
+   the web; the node warns when IMU is off.
+4. **Labelling the map.** Cluster the unidentified fingerprints and label a
+   cluster to a track from the review queue, twins and "not a track". The
+   admin role and separate portal pages come with multi-user.
 5. **Relay** (optional), then **multi-user**, then hosting if still wanted.

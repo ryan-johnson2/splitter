@@ -1,6 +1,6 @@
 # Implementation plan: capture nodes, web server, and sync
 
-Status: plan (2026-09-25), branch `feature/cloud-sync`. The design is
+Status: plan (2026-09-25, revised 2026-09-26), branch `feature/cloud-sync`. The design is
 `docs/sync-design.md`; this is how it gets built, phase by phase, against the
 code as it stands at 0.5.2. Each phase ships on its own, keeps the current
 single-process app working, and is tracked by one GitHub issue.
@@ -9,8 +9,8 @@ single-process app working, and is tracked by one GitHub issue.
 |-------|-------|----------|------------------------------------------------------------------|
 | 1     | #11   | 0.6.0    | every run has an identity and a document; move results by hand   |
 | 2     | #12   | 0.7.0    | a node pushes runs to an upstream web; local DB stays small      |
-| 3     | #13   | 0.8.0    | headless node from logon; the web identifies tracks on arrival   |
-| 4     | #16   | 0.9.0    | admin portal labels the map                                      |
+| 3     | #13   | 0.8.0    | node as a service via an installer; the web identifies tracks    |
+| 4     | #16   | 0.9.0    | label clusters of unknown layouts from the review queue          |
 | 5     | #14   | later    | relay: live view and session pick from the web (optional)        |
 | 6     | #15   | later    | multi-user, then decide about hosting                            |
 
@@ -30,9 +30,19 @@ single-process app working, and is tracked by one GitHub issue.
   app through `ASGITransport` and never touch the network.
 - **Ingest auth = `Authorization: Bearer <token>`.** One token in the web's
   settings for now; per-user tokens are phase 6.
-- **The app stays one package and one binary.** Node, web, headless and
-  admin are what a given install has configured and which routers are
-  mounted, never separate programs. `create_app` grows keyword flags.
+- **The app stays one package, one binary, one process.** Node and web are
+  what a given install has configured, never separate programs, and there
+  is no headless build: the node is a service that also serves the pages,
+  and the desktop window is a viewer of it.
+- **Local runs are kept by default.** `keep_local_runs` defaults to on even
+  with an upstream, so the web is never the only copy and the finish-line
+  PB banner keeps working from local rows. Phase 1's blob already makes a
+  heavy year tens of MB.
+- **`seq` is assigned at outbox enqueue, not at GO.** Aborts with zero
+  crossings delete the row and never upload; a counter at GO would leave a
+  phantom gap for every false start. The uuid is still minted at GO.
+- **Deleted runs stay deleted.** The web keeps a `run_tombstones` table of
+  deleted uuids; ingest and import refuse them.
 - **No two-way sync, ever.** Edits and deletes happen on the web after the
   run is acknowledged. A node never re-uploads an acknowledged run.
 
@@ -82,7 +92,9 @@ uuid).
 - `game/controller.py::_start_race`: mint `uuid`, read/increment `node_seq`
   setting, stamp `node_id`. `_finish_race`: write the blob instead of rows;
   compute the fingerprint from the IMU buffer with the same geometry helper
-  `_check_track` uses and store it (also on aborts with crossings). Set
+  `_check_track` uses and store it (also on aborts with crossings). Take the
+  gate positions from the **fastest lap with no crash**, lap 1 as the
+  fallback, so a lap-1 crash does not put gates in odd places. Set
   `reference_uuid` alongside `reference_race_id`.
 - `db/repos.py`: `telemetry_for_race` keeps its signature and decodes the
   blob (falls back to rows). New `get_race_by_uuid`, `import_run(doc) ->
@@ -94,9 +106,17 @@ uuid).
   list, returning `[{uuid, status: created|exists|rejected, error?}]` and
   running `recalculate_best` once per touched `PBKey`.
 - `manage.py`: `splitter export [--since DATE] [--all] -o DIR`,
-  `splitter import FILE…`, `splitter migrate-telemetry [--drop]` (rows →
-  blobs, then optionally drop the table), `splitter backfill-fingerprints`
-  (from stored traces, like `backfill-crashes`).
+  `splitter import FILE…`, `splitter backfill-fingerprints` (from stored
+  traces, like `backfill-crashes`).
+- **Telemetry migration runs itself**: at startup, after `init_db`, rows are
+  converted to blobs in batches of 50 races and the rows deleted per race
+  in the same transaction, so an interrupted startup resumes. Only
+  `splitter migrate-telemetry --drop` (drop the empty table) is manual, and
+  the docs say to `splitter export --all` first.
+- **Threshold spike** (before phase 3 relies on it): a script over the
+  existing database computing same-track and cross-track fingerprint
+  distances, to confirm 12 m over ≥ 4 gates separates layouts across many
+  runs and to pick the clustering threshold for phase 4.
 - Race page: an *Export* link; Races page: an *Import* button (file input).
 
 ### Tests
@@ -121,17 +141,24 @@ and appears there as a PB with its flight path, with no network code yet.
 
 ### Node side
 
-- Settings: `upstream_url`, `upstream_token`, `keep_local_runs` (`0` once an
-  upstream is set), `node_name`. Settings page section *Upstream* with a
-  *Test connection* button (`GET <upstream>/api/ingest/ping` with the token).
-- Table `outbox`: `race_uuid` PK, `queued_at`, `attempts`, `next_at`,
+- Settings: `upstream_url`, `upstream_token`, `keep_local_runs` (default
+  `1`), `node_name`. Settings page section *Upstream* with a *Test
+  connection* button (`GET <upstream>/api/ingest/ping` with the token) and a
+  *Remove local copies* button (`POST /api/sync/purge`: deletes every run
+  with an acked outbox row, shows the count first). The node refuses to send
+  the token over plain `http://` unless the host is a private address.
+- Table `outbox`: `race_uuid` PK, `seq`, `queued_at`, `attempts`, `next_at`,
   `last_error`, `acked_at` nullable. A row is added in `_finish_race` for
-  every finished or aborted-with-crossings run. Survives restarts.
+  every finished or aborted-with-crossings run, and that is where `seq` is
+  taken from the `node_seq` setting. Survives restarts.
 - `sync/uploader.py::Uploader`: supervised task next to the bridge (same
   `_supervise`). Loop: pick due rows oldest first, build the document, `PUT`
   it, on 2xx mark acked, store the returned reference bundle in the cache,
-  and delete the local run unless `keep_local_runs`. Backoff 5 s → 5 min.
-  Wakes immediately on a new outbox row (an `asyncio.Event`).
+  and delete the local run only when `keep_local_runs` is off. Backoff 5 s →
+  5 min. Wakes immediately on a new outbox row (an `asyncio.Event`). A 409
+  `unsupported document version` or 410 `deleted` is terminal: the row is
+  marked with the reason, never retried, and the Settings page and live
+  header show it.
 - Table `reference_cache`: `pb_key` (text `track:quad:laps`) PK, `payload`
   JSON, `updated_at`. `controller.refresh_reference` order: cache, then
   upstream `GET /api/reference?…` when connected, then local DB.
@@ -148,17 +175,23 @@ and appears there as a PB with its flight path, with no network code yet.
 - Setting `ingest_token` (generated on first view of the Settings page,
   shown once, regenerate button).
 - `PUT /api/ingest/runs/{uuid}` in `web/routes/ingest.py`: bearer check,
-  `repos.import_run` with `origin=ingest` and `received_at=now`, per-key
-  `recalculate_best`, response `{status, reference: bundle}`.
-  `GET /api/ingest/ping` for the test button. `GET /api/reference` for cold
-  starts (also served on a node from its own DB, so the app is symmetric).
+  body cap (8 MB) before parsing, tombstone check (410), `DOC_VERSION`
+  check (409 with the supported version), `repos.import_run` with
+  `origin=ingest` and `received_at=now`, per-key `recalculate_best`,
+  response `{status, reference: bundle}`. `GET /api/ingest/ping` returns
+  `{ok, version, doc_version}` for the test button. `GET /api/reference`
+  for cold starts (also served on a node from its own DB, so the app is
+  symmetric).
+- Table `run_tombstones`: `uuid` PK, `deleted_at`. Written by
+  `repos.delete_race`; checked by ingest and `POST /api/import`.
 - The reference bundle = `Reference` crossings for the key + `track_geometry`
   for the track, in `core/splits.py` shape so the node can load it straight
   into `Reference`.
-- Table `nodes`: `node_id` PK, `name`, `last_seen_at`, `max_seq`. Ingest
-  updates it; the Races page shows "n runs pending from *name*" when
-  `max_seq` minus the count of runs with that node_id is positive, and lists
-  the gaps in a tooltip.
+- Table `nodes`: `node_id` PK, `name`, `last_seen_at`, `max_seq`,
+  `imu_seen_at`. Ingest updates it; the Races page shows "n runs pending
+  from *name*" when `max_seq` minus the count of runs with that node_id is
+  positive, and lists the gaps in a tooltip. `imu_seen_at` comes from the
+  document (`telemetry.samples > 0`).
 
 ### Tests
 
@@ -166,9 +199,12 @@ and appears there as a PB with its flight path, with no network code yet.
   `ASGITransport` client. A finished run appears on the web within one loop
   iteration; a 500 from the web keeps it queued with backoff; a duplicate
   `PUT` is a no-op; after ack the node has no race row when
-  `keep_local_runs` is off; the reference cache holds the bundle from the
-  response and `refresh_reference` uses it with the DB empty.
-- Auth: wrong token → 401, nothing written.
+  `keep_local_runs` is off and still has it when on; the reference cache
+  holds the bundle from the response and `refresh_reference` uses it with
+  the DB empty; a purge deletes only acked runs.
+- Auth: wrong token → 401, nothing written. Tombstoned uuid → 410 and the
+  outbox row is terminal. Newer `DOC_VERSION` → 409 and terminal.
+- Seq: an abort with no crossings between two uploads leaves no gap.
 
 ### Done when
 
@@ -176,29 +212,47 @@ The LXC is the web, the desktop app is a node, and a run flown on the PC
 shows up on the LXC's Races page in seconds with the PC keeping only its
 outbox and reference cache.
 
-## Phase 3: headless node from logon, identification on the web (#13)
+## Phase 3: the node as a service, identification on the web (#13)
 
 ### Node
 
-- `create_app(headless=True)`: no templates, no static mount, no page
-  routers; keeps `/healthz`, `/api/state`, `/api/session`, `/api/capture`,
-  `/api/race/abort` and `/ws/live` (the relay in phase 5 needs them, and a
-  tablet can still hit the JSON). `splitter node` and `splitter-sidecar
-  --headless` both call it. Log one line per run: "run 412 finished 71.2 s,
-  uploaded".
-- Sticky session off by default in headless mode (`sticky_session` setting,
-  default `0` there, `1` in the full app).
-- `splitter service install | remove | status`: Windows → `schtasks` at
-  logon running `splitter-sidecar --headless --data-dir …`; Linux → systemd
-  user unit; macOS → launchd agent. Writes `<data_dir>/node.pid` and
-  `node.port` while running.
-- Desktop shell: on launch, if `node.pid` is alive, open the window at that
-  port instead of spawning a sidecar (`lib.rs`). Settings page toggle *Run in
-  the background at logon* calls install/remove through a new
-  `POST /api/service`.
-- Runs from a headless node upload with `reference_uuid` null and
-  `pb_delta_ms` null; the web fills both against the PB as of ingest and
-  sets `delta_source = derived` (new column, display only).
+- **No headless build.** The service runs `create_app` as it is; the pages
+  cost nothing. `splitter node` is dropped from the plan.
+- `splitter service install | remove | status | start | stop`
+  (`splitter/service.py`): Windows → `sc create` with the service binary at
+  its installed path, auto start, and a DACL that lets interactive users
+  start and stop it; Linux → a systemd unit; macOS → a launchd daemon.
+  Renders the unit/task text with a `--dry-run` flag so tests cover it
+  without registering anything. Windows service entry: `pywin32`
+  `ServiceFramework` wrapper around `desktop_entry.main`, or the NSSM-style
+  approach if pywin32 fights PyInstaller; decide with a spike.
+- **Data dir** for the service is `%ProgramData%\Splitter` (Windows),
+  `/var/lib/splitter` (Linux, as the LXC already does). `SPLITTER_DATA_DIR`
+  stays the override. On first start with an empty database the service
+  copies `splitter-data/splitter.db` from a portable install next to a
+  known path (the installer passes it) and logs that it did.
+- **Installer**: Tauri's NSIS bundle, per-machine, with install hooks that
+  run `service install` and `service start`, and upgrade hooks that stop
+  before replacing and start after. Uninstall runs `service remove` and
+  leaves ProgramData unless the user ticks *remove my data*. The portable
+  exe keeps building for two more releases and is listed second.
+- **Window as viewer**: `lib.rs` reads `<data dir>/node.port` (written by
+  the service on bind) and opens the webview there. If the file is missing
+  or the port does not answer, the window shows a *Service not running*
+  page with a *Start* button (`sc start`, allowed by the DACL) and a link to
+  the log. The window no longer spawns a sidecar when a service is
+  installed; a portable install still does, unchanged.
+- **IMU warning**: the controller sets `imu_missing` when a run reaches its
+  first crossing with no `imu` frame received since GO, and clears it when
+  one arrives. Snapshot carries it; the live header shows a warning with
+  help key `imu` (how to enable `web-socket-imu` in the game); the service
+  raises one OS notification per session (`plyer` or Tauri's notification
+  API through the window when open). Never blocks recording.
+- Sticky session stays on; with an upstream the web can re-attribute, and
+  the review queue shows `session_source` so sticky guesses are visible.
+- Runs upload with `reference_uuid` null and `pb_delta_ms` null when the
+  node had no reference at GO; the web fills both against the PB as of
+  ingest and sets `delta_source = derived` (new column, display only).
 
 ### Web
 
@@ -207,7 +261,8 @@ outbox and reference cache.
   id for learned, "" for labelled), `origin_race_uuid`, `created_at`.
 - `core/trackcheck.py`: `rank` and `decide` already take candidates as plain
   geometry; `web/identify.py` loads the registry for a gate count (cached,
-  invalidated on write) and runs them at ingest. Clear winner → `track_id`,
+  invalidated on write) and runs them at ingest, with the thresholds the
+  phase 1 spike confirmed. Clear winner → `track_id`,
   `session_source = matched`. Otherwise `track_id` 0 and the run is
   *unidentified*.
 - Learning: `update_race` and bulk edit, when they set a `track_id` on a run
@@ -215,8 +270,9 @@ outbox and reference cache.
   threshold exists. A *Re-run identification* button on the review queue
   re-ranks every unidentified run.
 - Review queue: `/races?unidentified=1` grouped by node, gate count and day,
-  with the existing bulk-edit picker. Twins: when `decide` finds two winners
-  that are the same layout under different scenes, attribute to the
+  with the existing bulk-edit picker, and a "no IMU" note on nodes whose
+  `imu_seen_at` is stale. Twins: when `decide` finds two winners that are
+  the same layout under different scenes, attribute to the
   `(track_id, scene_id)` the same node flew most recently and set
   `track_check_note = ambiguous` for the queue to show.
 - No fingerprint (no IMU): queued by gate count and day only, never
@@ -224,8 +280,10 @@ outbox and reference cache.
 
 ### Tests
 
-- Headless app serves JSON and no HTML; `service` command renders the right
-  unit/task text per platform (dry-run flag, no registration in tests).
+- `service --dry-run` renders the right unit/service definition per
+  platform; `node.port` is written on bind and removed on exit.
+- IMU warning flips on at the first crossing without frames and off on the
+  first frame; one notification per session.
 - Identification: registry with two tracks, a run whose fingerprint matches
   one is attributed at ingest; an unmatched run is unidentified; attributing
   it teaches the registry and the next identical run matches; twins are
@@ -233,39 +291,39 @@ outbox and reference cache.
 
 ### Done when
 
-A PC with only the background node installed records every run, and the
-web attributes them without anyone touching the PC, after the pilot has
-labelled each track once.
+A PC with the installer run once records every run from boot with nobody
+touching it, the window opens on the running service, and the web
+attributes the runs after the pilot has labelled each track once.
 
-## Phase 4: the admin portal (#16)
+## Phase 4: label clusters of unknown layouts (#16)
 
-- Role: `is_admin` on the single-user web is implicitly true; multi-user
-  (phase 6) adds the column. Routes under `/admin`, hidden from the nav for
-  non-admins, 403 otherwise.
+Trimmed from a separate admin portal to actions on the review queue: on a
+single-user web the two would be the same page. The admin role and
+`/admin` pages move to phase 6 with multi-user.
+
 - `web/clusters.py` (pure, tested): group unidentified fingerprints into
-  clusters with the trackcheck thresholds (greedy: each fingerprint joins the
-  first cluster whose centroid it is within 12 m of over ≥ 4 gates, same
-  gate count; centroid = mean gate positions). Deterministic order by first
-  seen.
-- `/admin/fingerprints`: one card per cluster: map (reuse the track page's
-  top-down SVG), gate count, runs, distinct nodes, first/last seen, and the
-  picker. Actions: *Label* (track + optional scene) → writes a `labelled`
-  registry row from the centroid and re-runs identification for the
-  cluster's runs; *Add twin* → a second `(track_id, scene_id)` on the same
-  row; *Not a track* → a `labelled` row with `track_id = -1` so the runs stop
-  appearing and stay unranked; *Merge* / *Split* by moving fingerprints
-  between clusters.
-- `/admin/tracks`: every labelled track with its fingerprint count, learned
-  vs labelled, and a *promote* action that turns a learned row into a global
-  label (this is how one pilot's attributions become everyone's on a hosted
-  web).
-- Registry rows are anonymous geometry; the portal never shows a run's
-  telemetry, only gate centroids.
+  clusters with the thresholds from the phase 1 spike (greedy by centroid:
+  each fingerprint joins the first cluster whose centroid it is within
+  threshold of, same gate count; centroid = mean gate positions).
+  Deterministic order by first seen.
+- The review queue gains a *By layout* view: one card per cluster with the
+  top-down map (reuse the track page's SVG), gate count, runs, distinct
+  nodes, first/last seen, and the picker. Actions: *Label* (track +
+  optional scene) writes a `labelled` registry row from the centroid and
+  re-runs identification for the cluster's runs; *Add twin* adds a second
+  `(track_id, scene_id)` to the same row; *Not a track* (`track_id = -1`)
+  hides the cluster and leaves its runs at `track_id` 0 without re-queuing
+  them; *Merge* / *Split* move fingerprints between clusters.
+- Track page: a *Layouts* box listing the track's registry rows, learned
+  and labelled, with *forget* for a wrong one.
+- Registry rows are anonymous geometry; the view shows gate centroids only,
+  never a run's telemetry. That is what lets the same rows be shared across
+  users in phase 6.
 
 ### Tests
 
-- Clustering: two runs of the same track cluster; a run 20 m off does not;
-  gate count separates otherwise identical layouts.
+- Clustering: two runs of the same track cluster; a run beyond threshold
+  does not; gate count separates otherwise identical layouts.
 - Labelling a cluster attributes all its runs and the next arrival; *Not a
   track* removes the cluster and keeps the runs at `track_id` 0 without
   re-queuing them.
@@ -285,10 +343,12 @@ required for a run to record.
 
 ## Phase 6: multi-user (#15)
 
-Unchanged. `user_id` on `races`, `track_sections`, `nodes`, `outbox`-free
-tables; per-user ingest tokens; `PBKey` gains `user_id`; the fingerprint
-registry is the one global table. Hosting is a decision for after this
-works self-hosted.
+`user_id` on `races`, `track_sections`, `nodes` and the web-side tables;
+per-user ingest tokens; `PBKey` gains `user_id`; `is_admin` and the
+`/admin` pages (the cluster view for every user's unidentified runs, and
+*promote* to turn one pilot's `learned` row into a global label); the
+fingerprint registry is the one global table. Hosting is a decision for
+after this works self-hosted.
 
 ## Cross-cutting
 
@@ -301,9 +361,13 @@ works self-hosted.
   web".
 - **Tests never reach the network.** The uploader and the relay take
   clients; `app.state.catalog` keeps taking a fake.
-- **Data safety.** `keep_local_runs` off deletes only after a 2xx ack that
-  echoes the uuid. `splitter export --all` is documented as the backup
-  before `migrate-telemetry --drop`.
+- **Data safety.** Deletion of a local run, whether by `keep_local_runs`
+  off or the purge button, happens only after a 2xx ack that echoes the
+  uuid. `splitter export --all` is documented as the backup before
+  `migrate-telemetry --drop`.
+- **Signing.** An unsigned installer trips SmartScreen the way an unsigned
+  exe trips Defender; the options in `docs/code-signing.md` are unchanged
+  and phase 3 is when it starts to matter.
 - **Out of scope for this branch.** Accounts, hosting, billing, the relay.
   The branch lands phase 1 and is cut per phase after that.
 
@@ -311,6 +375,7 @@ works self-hosted.
 
 1. `core/rundoc.py` and the columnar telemetry codec, with tests.
 2. Schema columns and the backfill in `init_db`.
-3. Controller: uuid/seq/fingerprint at GO and finish; blob at finish.
+3. Controller: uuid at GO, fingerprint and blob at finish (seq waits for
+   the outbox in phase 2).
 4. `repos.import_run`, export/import endpoints, CLI commands.
-5. `migrate-telemetry`, docs, 0.6.0.
+5. Startup telemetry migration, the threshold spike script, docs, 0.6.0.
