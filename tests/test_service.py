@@ -64,3 +64,8 @@ def test_dry_run_prints_and_touches_nothing(capsys: pytest.CaptureFixture[str]) 
     assert "would write /etc/systemd/system/splitter.service" in out
     assert "would run: systemctl enable --now splitter.service" in out
     assert "ExecStart=py -m splitter" in out
+    # An executable path with spaces stays one argument (Windows: quoted in binPath).
+    code = service.main(
+        ["install", "--platform", "win32", "--exe", "C:/Program Files/Splitter/s.exe", "--dry-run"]
+    )
+    assert code == 0 and '"C:/Program Files/Splitter/s.exe" --service' in capsys.readouterr().out

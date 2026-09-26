@@ -213,13 +213,14 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="splitter service")
     p.add_argument("action", choices=["install", "remove", "status", "start", "stop"])
     p.add_argument("--data-dir", default="")
-    p.add_argument("--exe", default="", help="command that runs the server (default: this one)")
+    p.add_argument("--exe", default="", help="executable that runs the server (default: this one)")
+    p.add_argument("--exe-args", default="", help="extra arguments for --exe, one string")
     p.add_argument("--platform", default=sys.platform, help=argparse.SUPPRESS)
     p.add_argument("--dry-run", action="store_true", help="print what would be done")
     args = p.parse_args(argv)
     platform = "win32" if args.platform.startswith("win") else args.platform
     data_dir = Path(args.data_dir) if args.data_dir else default_data_dir(platform)
-    exe = shlex.split(args.exe) if args.exe else default_exe()
+    exe = [args.exe, *shlex.split(args.exe_args)] if args.exe else default_exe()
     target = Target(exe, data_dir, platform)
     if args.action == "install" and not args.dry_run:
         data_dir.mkdir(parents=True, exist_ok=True)
