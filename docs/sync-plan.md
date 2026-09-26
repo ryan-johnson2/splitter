@@ -399,6 +399,53 @@ after this works self-hosted.
 - **Out of scope for this branch.** Accounts, hosting, billing, the relay.
   The branch lands phase 1 and is cut per phase after that.
 
+## Next session on the gaming PC (Windows)
+
+What is left needs a Windows machine with the game. In order:
+
+1. **Build the branch** (`feature/cloud-sync`): `python desktop/sidecar/build.py`,
+   then `npx -y @tauri-apps/cli@2 build --no-bundle` in `desktop/src-tauri`,
+   or push a `dev-*` tag and take the CI artifacts.
+2. **Node against the LXC.** On the LXC (upgrade it with the bundle from the
+   same build): Settings → *Receive runs* → turn on, copy the token. On the
+   PC's portable build: Settings → *Send runs to another Splitter* → the LXC
+   address and token → *Test connection*. Fly a run: it should appear on the
+   LXC's Races page within seconds with "Receiving from <PC name>", and the
+   PC's header *Web* indicator should read *sent*. Then clear the track on
+   the PC (or pick nothing) and fly the same track: the LXC should attribute
+   it (`matched`). Fly a new track: it should land under *no track yet*,
+   label it once on `/races/layouts`, fly it again, check it is recognised.
+3. **Threshold check** on the LXC's real data: `splitter fingerprint-stats`
+   (after `splitter backfill-fingerprints`). Same-track pairs should sit well
+   under 12 m and cross-track pairs well over; if not, adjust
+   `trackcheck.DIFFERENT_M` / `CLOSE_M` before trusting identification.
+4. **Windows service spike.** In an elevated prompt:
+   `splitter-sidecar.exe service install --dry-run` to review, then without
+   `--dry-run`. Watch for the SCM 30 s timeout ("did not respond") — that is
+   the pywin32-under-PyInstaller question. If `sc start Splitter` works and
+   `node.port` appears in `%ProgramData%\Splitter`, service mode is fine;
+   if not, switch `windows_commands` to a WinSW wrapper. Check `sc stop`
+   works as a plain user (the DACL). Note: PyInstaller must bundle pywin32
+   (`pip install pywin32` before `build.py`; add `servicemanager`,
+   `win32serviceutil` as hidden imports if the build drops them).
+5. **Installer.** `tauri.conf.json`: enable the NSIS bundle, `installMode`
+   `perMachine`, an `installerHooks` NSI with `NSIS_HOOK_POSTINSTALL` running
+   `service install`, `NSIS_HOOK_PREUNINSTALL` running `service remove`, and
+   pre/post-update stop/start. Move the sidecar from *embedded archive* to a
+   bundled `resources` folder at a stable path for the installer build.
+6. **Shell attach.** `lib.rs`: before unpacking, read `<data>/node.port`; if
+   `http://127.0.0.1:<port>/healthz` answers, open the window there and skip
+   the sidecar; else the *Service not running* page with a *Start* button
+   (`sc start Splitter`).
+7. **Data-dir migration.** First service start with an empty database copies
+   `splitter-data/splitter.db` from the portable install if the installer
+   recorded its path.
+8. **Missing-IMU OS notification** from the service or the shell (header
+   warning already exists).
+
+Everything above is tracked in #13; the branch is otherwise ready to merge
+after the node-against-LXC check in step 2 passes.
+
 ## First steps on this branch
 
 1. `core/rundoc.py` and the columnar telemetry codec, with tests.
