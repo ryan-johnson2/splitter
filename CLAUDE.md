@@ -326,6 +326,27 @@ required for a run to record.
   the service's data dir migration from a portable install, the OS
   notification for missing IMU.
 
+## Label by layout (sync phase 4)
+
+- `web/clusters.py` (pure): unidentified runs with a fingerprint, in order of
+  first flight, greedily join the first cluster with the same gate count whose
+  centroid (running mean of located gates) is within `trackcheck.DIFFERENT_M`;
+  fewer than `MIN_GATES` located gates are skipped.
+- `/races/layouts`: one card per cluster (top-down map of the centroid, gate
+  count, runs, node names, first/last seen) with the online picker;
+  `POST /races/layouts/label` with `action=label` registers the centroid as a
+  **labelled** row (`repos.label_layout`, `owner` "") and re-attributes the
+  cluster's runs (`update_race`, `session_source` `matched`), then re-runs
+  identification for the rest of the queue; `action=ignore` registers it under
+  `repos.NOT_A_TRACK` (-1) and marks the runs `track_note = "not a track"`,
+  which keeps them out of the queue (`_queue_filter`); arrivals matching a
+  not-a-track row get the same note at ingest. The Races review card links here.
+- Track page: a collapsed *Known layouts* box listing the registry rows for
+  the track (labelled / learned, owner) with *Forget*
+  (`POST /tracks/{id}/layouts/{fid}/forget`). Merge/split of clusters and
+  explicit twin management are not built; label each twin's cluster to its own
+  track and identification flags the ambiguity.
+
 ## Wire facts to remember
 
 All race-event scalars are strings (`"3"`, `"69.711"`, `"True"`), `uid` in

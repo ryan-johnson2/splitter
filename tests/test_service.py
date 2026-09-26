@@ -47,25 +47,14 @@ def test_launchd_plist_and_windows_commands() -> None:
 
 
 def test_dry_run_prints_and_touches_nothing(capsys: pytest.CaptureFixture[str]) -> None:
-    code = service.main(
-        [
-            "install",
-            "--platform",
-            "linux",
-            "--data-dir",
-            "/tmp/x",
-            "--exe",
-            "py -m splitter",
-            "--dry-run",
-        ]
-    )
+    argv = ["install", "--platform", "linux", "--data-dir", "/tmp/x", "--dry-run"]
+    code = service.main([*argv, "--exe", "py", "--exe-args", "-m splitter"])
     assert code == 0
     out = capsys.readouterr().out
     assert "would write /etc/systemd/system/splitter.service" in out
     assert "would run: systemctl enable --now splitter.service" in out
     assert "ExecStart=py -m splitter" in out
     # An executable path with spaces stays one argument (Windows: quoted in binPath).
-    code = service.main(
-        ["install", "--platform", "win32", "--exe", "C:/Program Files/Splitter/s.exe", "--dry-run"]
-    )
-    assert code == 0 and '"C:/Program Files/Splitter/s.exe" --service' in capsys.readouterr().out
+    exe = "C:/Program Files/Splitter/s.exe"
+    code = service.main(["install", "--platform", "win32", "--exe", exe, "--dry-run"])
+    assert code == 0 and f'"{exe}" --service' in capsys.readouterr().out

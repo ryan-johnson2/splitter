@@ -1,7 +1,7 @@
 # Implementation plan: capture nodes, web server, and sync
 
-Status: plan (2026-09-25, revised 2026-09-26; phases 1 and 2 built 2026-09-26),
-branch `feature/cloud-sync`. The design is
+Status: plan (2026-09-25, revised 2026-09-26; phases 1, 2 and 4 and the web side
+of 3 built 2026-09-26), branch `feature/cloud-sync`. The design is
 `docs/sync-design.md`; this is how it gets built, phase by phase, against the
 code as it stands at 0.5.2. Each phase ships on its own, keeps the current
 single-process app working, and is tracked by one GitHub issue.
@@ -318,7 +318,12 @@ A PC with the installer run once records every run from boot with nobody
 touching it, the window opens on the running service, and the web
 attributes the runs after the pilot has labelled each track once.
 
-## Phase 4: label clusters of unknown layouts (#16)
+## Phase 4: label clusters of unknown layouts (#16) — built
+
+Built 2026-09-26: clustering, the by-layout view with a map per cluster and
+the picker, *Label* and *Not a track*, the track page's known-layouts box
+with *Forget*. Not built: *Add twin*, *Merge* / *Split* (label each twin's
+cluster to its own track instead; a mis-clustered run is fixed run by run).
 
 Trimmed from a separate admin portal to actions on the review queue: on a
 single-user web the two would be the same page. The admin role and

@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse
 
 from splitter.core import quads
 from splitter.db import repos
-from splitter.web import analysis
+from splitter.web import analysis, clusters
 from splitter.web.templating import redirect_with_flash, templates
 
 router = APIRouter(prefix="/races")
@@ -47,6 +47,92 @@ async def races_page(
             },
         },
     )
+
+
+@router.get("/layouts", response_class=HTMLResponse)
+async def layouts_page(request: Request) -> Any:
+    """Unidentified runs grouped by layout: label a cluster once."""
+    async with request.app.state.session_factory() as db:
+        runs = await repos.unidentified_runs(db)
+        nodes = {n.node.node_id: n.node.name for n in await repos.nodes_status(db)}
+    members = []
+    without = 0
+    for r in runs:
+        fp = repos.fingerprint_of(r)
+        if fp is None:
+            without += 1
+            continue
+        members.append(clusters.Member(r.id, r.started_at, r.node_id, fp))
+    found = clusters.cluster(members)
+    cards = []
+    for i, c in enumerate(found, start=1):
+        cen = c.centroid
+        cards.append(
+            {
+                "n": i,
+                "gates_per_lap": c.gates_per_lap,
+                "runs": len(c.members),
+                "race_ids": [m.race_id for m in c.members],
+                "nodes": sorted(nodes.get(x, x[:8]) or x[:8] for x in c.nodes),
+                "first_seen": c.first_seen,
+                "last_seen": c.last_seen,
+                "points": [[k, round(p[0], 1), round(p[2], 1)] for k, p in cen.positions.items()],
+            }
+        )
+    return templates.TemplateResponse(
+        request,
+        "layouts.html",
+        {"cards": cards, "without_fingerprint": without, "queued": len(runs)},
+    )
+
+
+@router.post("/layouts/label")
+async def layouts_label(
+    request: Request,
+    race_ids: list[int] = Form([]),  # noqa: B008
+    action: str = Form("label"),
+    track_name: str = Form(""),
+    scenery: str = Form(""),
+    track_id: int = Form(0),
+    scene_id: int = Form(0),
+    track_source: str = Form(""),
+) -> Any:
+    """Label a cluster (its runs, by id) as a track, or as not a track."""
+    if not race_ids:
+        return redirect_with_flash("/races/layouts", error="Nothing to label.")
+    if action == "label" and track_id <= 0:
+        return redirect_with_flash("/races/layouts", error="Pick the track from the search first.")
+    async with request.app.state.session_factory() as db:
+        members = []
+        for rid in race_ids:
+            race = await repos.get_race(db, rid)
+            fp = repos.fingerprint_of(race) if race else None
+            if race is not None and fp is not None:
+                members.append(clusters.Member(race.id, race.started_at, race.node_id, fp))
+        if not members:
+            return redirect_with_flash("/races/layouts", error="Those runs have no fingerprint.")
+        group = clusters.Cluster(members[0].fingerprint.gates_per_lap)
+        for m in members:
+            group.add(m)
+        if action == "ignore":
+            await repos.label_layout(db, group.centroid, race_ids, track_id=repos.NOT_A_TRACK)
+            note = f"{len(race_ids)} run{'s' if len(race_ids) != 1 else ''} marked as not a track."
+        else:
+            await repos.label_layout(
+                db,
+                group.centroid,
+                race_ids,
+                track_id=track_id,
+                scene_id=max(0, scene_id),
+                track_name=track_name.strip(),
+                scenery=scenery.strip(),
+                track_source=track_source.strip(),
+            )
+            more = await repos.identify_unidentified(db)
+            note = f"Labelled {_ids(race_ids)} as {track_name.strip() or '#' + str(track_id)}"
+            note += f"; {more} more recognised." if more else "."
+    await request.app.state.controller.refresh_reference()
+    return redirect_with_flash("/races/layouts", notice=note)
 
 
 @router.post("/identify")

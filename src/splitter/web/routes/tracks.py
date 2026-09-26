@@ -37,6 +37,7 @@ async def track_page(
         finished = [r for r in races if r.status == "finished" and r.total_time_ms is not None]
         best = min(finished, key=lambda r: r.total_time_ms or 0) if finished else None
         sections = await analysis.track_analysis(db, track_id, races, best) if key.valid else None
+        layouts = await repos.fingerprints_for_track(db, track_id) if key.valid else []
     track = races[-1].track_name if races else track
     quad = quads.model_name(quad_model) or (races[-1].quad_type if races else "")
 
@@ -97,7 +98,22 @@ async def track_page(
             "section_stats": sorted(sections.stats, key=lambda s: -(s.on_table_ms or -1))
             if sections
             else [],
+            "layouts": layouts,
         },
+    )
+
+
+@router.post("/{track_id}/layouts/{fingerprint_id}/forget")
+async def layout_forget(request: Request, track_id: int, fingerprint_id: int) -> Any:
+    """Drop one registry row (a wrong attribution taught it); runs are untouched."""
+    from splitter.web.templating import redirect_with_flash
+
+    async with request.app.state.session_factory() as db:
+        ok = await repos.forget_fingerprint(db, fingerprint_id)
+    if not ok:
+        raise HTTPException(404)
+    return redirect_with_flash(
+        f"/tracks/detail?track_id={track_id}#layouts", notice="Layout forgotten."
     )
 
 

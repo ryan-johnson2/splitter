@@ -10,6 +10,21 @@
   <div class="card kv">Theoretical best<b>{{ format_ms(theoretical) }}</b>{% if theoretical and best %}<span class="{{ delta_class(theoretical - best.total_time_ms) }}">{{ format_delta(theoretical - best.total_time_ms) }} vs PB</span> · fastest segment at every gate across {{ comparable }} runs{% endif %}</div>
 </div>
 
+{% if layouts %}
+<details class="card" id="layouts">
+  <summary>Known layouts <span class="pill dim">{{ layouts | length }}</span> <span class="muted small">— how runs with no track are recognised as this one</span></summary>
+  <table class="small mono" style="margin-top:.6rem">
+    <tr><th>When</th><th>Gates</th><th>Source</th><th></th></tr>
+    {% for l in layouts %}<tr>
+      <td><time datetime="{{ utc_iso(l.created_at) }}">{{ l.created_at }}</time></td>
+      <td class="num">{{ l.gates_per_lap }}</td>
+      <td>{% if l.source == "labelled" %}<span class="pill accent small">labelled</span>{% else %}<span class="pill dim small">learned</span>{% if l.owner %} <span class="muted">from {{ l.owner[:8] }}</span>{% endif %}{% endif %}</td>
+      <td><form method="post" action="/tracks/{{ track_id }}/layouts/{{ l.id }}/forget" class="inline-form"><button type="submit" class="btn sm" onclick="return confirm('Forget this layout? Runs keep their track; future runs on it will need labelling again.')">Forget</button></form></td>
+    </tr>{% endfor %}
+  </table>
+</details>
+{% endif %}
+
 {% if analysis %}
 <div class="card" id="sections-card">
   <div class="card-head"><h2>Sections</h2>

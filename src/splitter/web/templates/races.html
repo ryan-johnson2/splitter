@@ -14,7 +14,7 @@
 
 {% if filter.unidentified %}
 <div class="card" id="review">
-  <div class="card-head"><h2>Runs with no track</h2><span class="actions"><button type="submit" form="identify-form" class="btn sm">Re-run identification</button></span></div>
+  <div class="card-head"><h2>Runs with no track</h2><span class="actions"><a class="btn sm primary" href="/races/layouts">Label by layout</a> <button type="submit" form="identify-form" class="btn sm">Re-run identification</button></span></div>
   <p class="help">Single player never names the track, so runs pushed from a Splitter with nothing picked land here. Tick the runs of one layout and pick the track in <b>Bulk edit</b> below: from then on every run with those gate positions is recognised on arrival. <span class="pill dim">ambiguous</span> marks a layout that exists under two tracks (day and night scenes, say) — check it is the right one.</p>
 </div>
 <form method="post" action="/races/identify" id="identify-form"></form>

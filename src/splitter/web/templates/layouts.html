@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}{{ brand_name }} · Layouts{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Runs with no track, by layout</h1>
+  <p class="sub">{{ queued }} run{{ "s" if queued != 1 }} waiting{% if without_fingerprint %} · {{ without_fingerprint }} without IMU data (no layout to go on — use <a href="/races?unidentified=1">the list</a>){% endif %} · <a href="/races?unidentified=1">run by run</a></p></div>
+<p class="help">Each card is one layout Splitter has seen but cannot name. Pick its track once and every run on it, now and later, is recognised. Freestyle or practice in an empty scene? <i>Not a track</i> keeps those runs out of the way.</p>
+
+{% if not cards %}<div class="card"><p class="empty">Nothing to label.</p></div>{% endif %}
+<div class="grid layouts">
+{% for c in cards %}
+<form method="post" action="/races/layouts/label" class="card layout" id="layout-{{ c.n }}">
+  {% for rid in c.race_ids %}<input type="hidden" name="race_ids" value="{{ rid }}">{% endfor %}
+  <div class="card-head"><h2>Layout {{ c.n }}</h2><span class="muted small">{{ c.gates_per_lap }} gates · {{ c.runs }} run{{ "s" if c.runs != 1 }} · from {{ c.nodes | join(", ") }} · <time datetime="{{ utc_iso(c.first_seen) }}">{{ c.first_seen }}</time>{% if c.runs > 1 %} → <time datetime="{{ utc_iso(c.last_seen) }}">{{ c.last_seen }}</time>{% endif %}</span></div>
+  <svg class="chart map layout-map" viewBox="0 0 360 240" data-points='{{ c.points | tojson }}'></svg>
+  <div class="field tp" data-picker>
+    <div class="searchbar">
+      <input class="tp-search" type="search" placeholder="search for the right track…" autocomplete="off" autocapitalize="off">
+      <select class="tp-source"><option value="">All</option><option value="community">Community</option><option value="official">Official</option></select>
+    </div>
+    <div class="picker-results tp-results"></div>
+    <div class="picked tp-picked"></div>
+    <input type="hidden" name="track_name"><input type="hidden" name="scenery">
+    <input type="hidden" name="track_id" value="0"><input type="hidden" name="scene_id" value="0"><input type="hidden" name="track_source" value="">
+  </div>
+  <div class="inline-form">
+    <button type="submit" name="action" value="label" class="primary">Label as this track</button>
+    <button type="submit" name="action" value="ignore" class="btn sm" onclick="return confirm('Mark these runs as not a track? They stay recorded but leave this list.')">Not a track</button>
+    <a class="btn sm" href="/races?unidentified=1">Runs</a>
+  </div>
+</form>
+{% endfor %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/picker.js?v={{ app_version }}"></script>
+<script>
+  (function () {
+    var NS = "http://www.w3.org/2000/svg";
+    document.querySelectorAll("svg.layout-map").forEach(function (svg) {
+      var pts = JSON.parse(svg.getAttribute("data-points") || "[]");
+      if (pts.length < 2) return;
+      var xs = pts.map(function (p) { return p[1]; }), zs = pts.map(function (p) { return p[2]; });
+      var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs), minZ = Math.min.apply(null, zs), maxZ = Math.max.apply(null, zs);
+      var span = Math.max(maxX - minX, maxZ - minZ, 1), pad = 24, size = 360 - 2 * pad, sy = 240 - 2 * pad;
+      var scale = Math.min(size / span, sy / span);
+      function px(p) { return pad + (p[1] - minX) * scale + (size - (maxX - minX) * scale) / 2; }
+      function py(p) { return pad + (p[2] - minZ) * scale + (sy - (maxZ - minZ) * scale) / 2; }
+      function el(tag, attrs) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); svg.appendChild(e); return e; }
+      for (var i = 0; i < pts.length; i++) {
+        var a = pts[i], b = pts[(i + 1) % pts.length];
+        el("line", { x1: px(a), y1: py(a), x2: px(b), y2: py(b), class: "seg sec-" + (i % 8), "stroke-width": 3, "stroke-linecap": "round" });
+      }
+      pts.forEach(function (p, i) {
+        el("circle", { cx: px(p), cy: py(p), r: 4.5, class: "gate sec-" + (i % 8) });
+        if (p[0] === 1 || p[0] === pts.length || p[0] % 5 === 0) { var t = el("text", { x: px(p) + 6, y: py(p) - 5, class: "label" }); t.textContent = p[0] === pts.length ? "S/F" : "G" + p[0]; }
+      });
+    });
+    document.querySelectorAll("[data-picker]").forEach(function (root) { Splitter.trackPicker(root, { emptyText: "No track picked yet — search above." }); });
+  })();
+</script>
+{% endblock %}

@@ -995,6 +995,11 @@ async def identify_race(session: AsyncSession, race: Race) -> identification.Dec
         return identification.Decision(None, False, [])
     registry = await registry_for(session, fp.gates_per_lap)
     decision = identification.identify(fp, registry)
+    if decision.track is not None and decision.track.track_id == NOT_A_TRACK:
+        # Labelled as freestyle / practice: leave it unidentified but out of the queue.
+        race.track_note = "not a track"
+        await session.commit()
+        return identification.Decision(None, False, decision.candidates)
     if decision.track is not None:
         k = decision.track
         race.track_id = k.track_id
@@ -1051,9 +1056,78 @@ async def derive_delta(session: AsyncSession, race: Race) -> None:
     await session.commit()
 
 
+NOT_A_TRACK = -1  # registry rows for layouts that are not a track (freestyle, practice)
+
+
+def _queue_filter() -> Any:
+    return (Race.track_id == 0) & (Race.status != "running") & (Race.track_note != "not a track")
+
+
 async def unidentified_count(session: AsyncSession) -> int:
-    stmt = select(func.count(Race.id)).where((Race.track_id == 0) & (Race.status != "running"))
+    stmt = select(func.count(Race.id)).where(_queue_filter())
     return int((await session.execute(stmt)).scalar() or 0)
+
+
+async def unidentified_runs(session: AsyncSession) -> list[Race]:
+    stmt = select(Race).where(_queue_filter()).order_by(Race.started_at)
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def label_layout(
+    session: AsyncSession,
+    fp: Fingerprint,
+    race_ids: Sequence[int],
+    *,
+    track_id: int,
+    scene_id: int = 0,
+    track_name: str = "",
+    scenery: str = "",
+    track_source: str = "",
+) -> TrackFingerprint:
+    """Register a cluster's centroid as a labelled layout (``track_id``
+    ``NOT_A_TRACK`` = freestyle) and attribute its runs accordingly."""
+    row = TrackFingerprint(
+        track_id=track_id,
+        scene_id=scene_id,
+        track_name=track_name if track_id != NOT_A_TRACK else "not a track",
+        scenery=scenery,
+        track_source=track_source,
+        gates_per_lap=fp.gates_per_lap,
+        gates=json.dumps(fp.to_dict()["gates"]),
+        source="labelled",
+        owner="",
+        created_at=utcnow(),
+    )
+    session.add(row)
+    await session.commit()
+    for rid in race_ids:
+        race = await session.get(Race, rid)
+        if race is None:
+            continue
+        if track_id == NOT_A_TRACK:
+            race.track_note = "not a track"
+            await session.commit()
+        else:
+            await update_race(
+                session,
+                rid,
+                track_id=track_id,
+                scene_id=scene_id,
+                track_name=track_name,
+                scenery=scenery,
+                track_source=track_source,
+                session_source="matched",
+            )
+    return row
+
+
+async def forget_fingerprint(session: AsyncSession, fingerprint_id: int) -> bool:
+    row = await session.get(TrackFingerprint, fingerprint_id)
+    if row is None:
+        return False
+    await session.delete(row)
+    await session.commit()
+    return True
 
 
 async def fingerprints_for_track(session: AsyncSession, track_id: int) -> list[TrackFingerprint]:
