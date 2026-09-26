@@ -66,8 +66,15 @@ No game handy? `splitter fake-game --loop` serves a scripted one on port 60003.
 **Moving runs between installs.** Every run is one JSON document: *Export* on
 a race page, *Import…* on the Races page (or `splitter export --all -o DIR`
 and `splitter import FILE…`). Importing is idempotent, so the same file twice
-does nothing, and personal bests are re-decided on arrival. This is the first
-step towards a node that pushes runs to a web server (`docs/sync-design.md`).
+does nothing, and personal bests are re-decided on arrival. 
+**One Splitter that keeps everything.** Run a second Splitter (the LXC or
+Docker one) as the place all results live: on it, Settings → *Receive runs* →
+turn on; on the timer next to the game, Settings → *Send runs to another
+Splitter* → its address and token. Every finished run is pushed up as soon
+as it can be, queued while the web is unreachable, and the live page's PB
+reference comes back down from the web so splits stay right even when the
+run was flown on another PC. Design and plan: `docs/sync-design.md`,
+`docs/sync-plan.md`.
 
 ## What is not in this repo
 

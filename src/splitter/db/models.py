@@ -200,3 +200,55 @@ class EventLog(Base):
     race_id: Mapped[int | None]
     event_type: Mapped[str]
     payload: Mapped[str] = mapped_column(Text, default="")
+
+
+# ── sync (docs/sync-design.md) ──────────────────────────────────────
+
+
+class Outbox(Base):
+    """A run waiting to be pushed to the upstream web, and its upload history."""
+
+    __tablename__ = "outbox"
+
+    race_uuid: Mapped[str] = mapped_column(primary_key=True)
+    seq: Mapped[int] = mapped_column(default=0)  # per-node upload counter, assigned here
+    queued_at: Mapped[datetime]
+    attempts: Mapped[int] = mapped_column(default=0)
+    next_at: Mapped[datetime]
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    acked_at: Mapped[datetime | None]
+    # Set when the web will never take it: version | deleted | rejected. Never retried.
+    terminal: Mapped[str] = mapped_column(default="")
+
+
+class ReferenceCache(Base):
+    """The upstream's reference bundle per PB key (JSON), for live splits and the
+    track check when the local database does not hold every run."""
+
+    __tablename__ = "reference_cache"
+
+    pb_key: Mapped[str] = mapped_column(primary_key=True)  # "track:quad:laps"
+    payload: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime]
+
+
+class RunTombstone(Base):
+    """A run deleted here on purpose; ingest and import refuse to bring it back."""
+
+    __tablename__ = "run_tombstones"
+
+    uuid: Mapped[str] = mapped_column(primary_key=True)
+    node_id: Mapped[str] = mapped_column(default="")
+    deleted_at: Mapped[datetime]
+
+
+class Node(Base):
+    """An install that has pushed runs here."""
+
+    __tablename__ = "nodes"
+
+    node_id: Mapped[str] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(default="")
+    last_seen_at: Mapped[datetime]
+    max_seq: Mapped[int] = mapped_column(default=0)
+    imu_seen_at: Mapped[datetime | None]

@@ -109,6 +109,13 @@ async def track_search(
     fails is reported under ``errors`` while the other's results still come back.
     """
     catalog = request.app.state.catalog
+    uploader = getattr(request.app.state, "uploader", None)
+    if not getattr(catalog, "available", True) and uploader is not None and uploader.configured:
+        # No private client here: the web has one, so search through it.
+        try:
+            return dict(await uploader.proxy_search(q, source, max(1, min(limit, 100))))
+        except Exception as e:  # the picker shows the error; nothing else depends on it
+            return {"tracks": [], "errors": {"upstream": f"{type(e).__name__}: {e}"}}
     result: SearchResult = await catalog.search(q, source, limit=max(1, min(limit, 100)))
     return result.to_dict()
 
@@ -236,7 +243,15 @@ async def import_races(request: Request) -> dict[str, Any]:
     if len(docs) > MAX_IMPORT_DOCS:
         raise HTTPException(413, f"at most {MAX_IMPORT_DOCS} documents per request")
     async with request.app.state.session_factory() as db:
-        results = await repos.import_runs(db, docs, origin="import")
+        results = await repos.import_runs(
+            db, docs, origin="import", default_node_id=request.app.state.settings.get("node_id")
+        )
+    uploader = getattr(request.app.state, "uploader", None)
+    if uploader is not None:
+        # Imported runs travel on like captured ones (a no-op without an upstream).
+        for r in results:
+            if r.status == "created" and r.race_id:
+                await uploader.enqueue(r.race_id)
     await request.app.state.controller.refresh_reference()
     statuses = ("created", "exists", "rejected")
     counts = {s: sum(1 for r in results if r.status == s) for s in statuses}
@@ -280,3 +295,72 @@ def _race_dict(r: Any) -> dict[str, Any]:
         "crash_count": r.crash_count,
         "notes": r.notes,
     }
+
+
+# ── sync (node side) ─────────────────────────────────────────────
+
+
+@router.get("/sync")
+async def sync_status(request: Request) -> dict[str, Any]:
+    uploader = request.app.state.uploader
+    async with request.app.state.session_factory() as db:
+        rows = await repos.outbox_rows(db)
+    return dict(uploader.status()) | {
+        "outbox": [
+            {
+                "uuid": r.race_uuid,
+                "seq": r.seq,
+                "queued_at": r.queued_at.isoformat() + "Z",
+                "attempts": r.attempts,
+                "acked_at": r.acked_at.isoformat() + "Z" if r.acked_at else None,
+                "terminal": r.terminal,
+                "last_error": r.last_error,
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.post("/sync/test")
+async def sync_test(request: Request) -> dict[str, Any]:
+    """Can this node reach the upstream with its token?"""
+    return dict(await request.app.state.uploader.ping())
+
+
+@router.post("/sync/flush")
+async def sync_flush(request: Request) -> dict[str, Any]:
+    """Push everything due now instead of waiting for the loop."""
+    uploader = request.app.state.uploader
+    if uploader.configured and not uploader.token_blocked:
+        await uploader.process_once()
+    return dict(uploader.status())
+
+
+@router.post("/sync/purge")
+async def sync_purge(request: Request) -> dict[str, Any]:
+    """Delete the local copies of runs the web has acknowledged."""
+    n = await request.app.state.uploader.purge()
+    await request.app.state.uploader.refresh_counts()
+    return {"deleted": n}
+
+
+@router.post("/sync/retry")
+async def sync_retry(request: Request) -> dict[str, Any]:
+    """Put terminal rows back in the queue (after upgrading the web, say)."""
+    from sqlalchemy import update
+
+    from splitter.db.models import Outbox
+    from splitter.util import utcnow
+
+    async with request.app.state.session_factory() as db:
+        result = await db.execute(
+            update(Outbox)
+            .where(Outbox.terminal != "")
+            .values(terminal="", attempts=0, next_at=utcnow(), last_error="")
+        )
+        await db.commit()
+    uploader = request.app.state.uploader
+    uploader.last_error = ""
+    await uploader.refresh_counts()
+    uploader.wake()
+    return {"requeued": int(getattr(result, "rowcount", 0) or 0)}

@@ -13,6 +13,15 @@ DEFAULTS: dict[str, str] = {
     # minted once at startup, shown on the Settings page.
     "node_id": "",
     "node_name": "",
+    # Push finished runs to another Splitter (the "web"): its base URL and the
+    # ingest token it shows on its Settings page. keep_local_runs=0 deletes a
+    # run here once the web has acknowledged it. node_seq is the upload counter.
+    "upstream_url": "",
+    "upstream_token": "",
+    "keep_local_runs": "1",
+    "node_seq": "0",
+    # Accept runs pushed by other installs; empty = receiving is off.
+    "ingest_token": "",
     # The gaming PC. The game binds its LAN IP (never loopback), so this must
     # be that address even when Splitter runs on the same machine.
     "game_host": "",

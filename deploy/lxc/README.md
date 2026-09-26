@@ -15,6 +15,15 @@ install.sh         # inside the container: provisions or upgrades in place
 splitter.service   # the systemd unit
 ```
 
+## 0. What this install is for
+
+An LXC Splitter is a good **web**: the one place every run lives. After
+installing, open Settings → *Receive runs from other Splitters* → *Turn
+receiving on*, and give the token to each Splitter that records (the desktop
+app on the gaming PC): Settings → *Send runs to another Splitter*. Put Caddy
+(`caddy/`) in front so the token travels over https; a plain-http LAN address
+is accepted too.
+
 ## 1. Build the bundle
 
 ```sh

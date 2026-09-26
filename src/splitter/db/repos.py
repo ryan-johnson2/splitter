@@ -22,7 +22,11 @@ from splitter.db.models import (
     EventLog,
     GateTime,
     Lap,
+    Node,
+    Outbox,
     Race,
+    ReferenceCache,
+    RunTombstone,
     TelemetryBlob,
     TelemetrySample,
     TrackSection,
@@ -87,6 +91,7 @@ def reference_from_race(race: Race) -> Reference:
         crossings=[(g.seq, g.cumulative_ms, g.gate_ms) for g in race.gate_times],
         laps=[(lap.lap, lap.lap_ms) for lap in race.laps],
         gates_per_lap=race.gates_per_lap,
+        race_uuid=race.uuid,
     )
 
 
@@ -136,17 +141,26 @@ async def get_race(session: AsyncSession, race_id: int) -> Race | None:
     return await session.get(Race, race_id)
 
 
-async def delete_race(session: AsyncSession, race_id: int) -> bool:
+async def delete_race(session: AsyncSession, race_id: int, tombstone: bool = True) -> bool:
+    """Delete a run. ``tombstone`` (the default, a deliberate deletion) makes
+    ingest and import refuse to bring it back; the uploader passes False when
+    it removes a local copy the web has acknowledged."""
     race = await session.get(Race, race_id)
     if race is None:
         return False
     key = race_key(race)
     await session.execute(delete(TelemetrySample).where(TelemetrySample.race_id == race_id))
     await session.execute(delete(TelemetryBlob).where(TelemetryBlob.race_id == race_id))
+    if tombstone and race.uuid and await session.get(RunTombstone, race.uuid) is None:
+        session.add(RunTombstone(uuid=race.uuid, node_id=race.node_id, deleted_at=utcnow()))
     await session.delete(race)
     await session.commit()
     await recalculate_best(session, key)
     return True
+
+
+async def is_tombstoned(session: AsyncSession, uuid: str) -> bool:
+    return bool(uuid) and await session.get(RunTombstone, uuid) is not None
 
 
 async def update_race(session: AsyncSession, race_id: int, **fields: Any) -> Race | None:
@@ -416,12 +430,16 @@ class ImportResult:
         return d
 
 
-async def import_run(session: AsyncSession, doc: Any, origin: str = "import") -> ImportResult:
+async def import_run(
+    session: AsyncSession, doc: Any, origin: str = "import", default_node_id: str = ""
+) -> ImportResult:
     """Insert one run document; a uuid already on file is a no-op.
 
     Does not re-flag PBs: the caller does ``recalculate_best`` once per key
     after a batch. ``reference_uuid`` is resolved to a local row when that run
-    is here, else left for later.
+    is here, else left for later. A document with no ``node_id`` (hand-made,
+    or from before nodes existed) is stamped with ``default_node_id``: the
+    importing install becomes the run's node.
     """
     try:
         parsed = rundoc.parse(doc)
@@ -431,11 +449,14 @@ async def import_run(session: AsyncSession, doc: Any, origin: str = "import") ->
     existing = await get_race_by_uuid(session, parsed.uuid)
     if existing is not None:
         return ImportResult(parsed.uuid, "exists", existing.id, key=race_key(existing))
+    if await is_tombstoned(session, parsed.uuid):
+        return ImportResult(parsed.uuid, "rejected", error="this run was deleted here")
     fields = dict(parsed.race)
     fields["origin"] = origin
     fields["received_at"] = utcnow()
     fields["is_best"] = False
     fields["seq"] = parsed.seq
+    fields["node_id"] = parsed.node_id or default_node_id
     ref = await get_race_by_uuid(session, fields.get("reference_uuid") or "")
     fields["reference_race_id"] = ref.id if ref else None
     race = Race(**fields)
@@ -457,10 +478,10 @@ async def import_run(session: AsyncSession, doc: Any, origin: str = "import") ->
 
 
 async def import_runs(
-    session: AsyncSession, docs: Sequence[Any], origin: str = "import"
+    session: AsyncSession, docs: Sequence[Any], origin: str = "import", default_node_id: str = ""
 ) -> list[ImportResult]:
     """Import many documents and re-flag PBs once per touched key."""
-    results = [await import_run(session, doc, origin) for doc in docs]
+    results = [await import_run(session, doc, origin, default_node_id) for doc in docs]
     for key in {r.key for r in results if r.status == "created" and r.key}:
         await recalculate_best(session, key)
     return results
@@ -659,3 +680,206 @@ async def tracks_with_gate_count(
                 r.track_id, r.track_name, r.scenery, r.scene_id, r.track_source
             )
     return list(out.values())
+
+
+# ── sync: outbox, reference cache, nodes ──────────────────────────
+
+
+async def enqueue_outbox(session: AsyncSession, race_uuid: str, seq: int) -> None:
+    if await session.get(Outbox, race_uuid) is None:
+        now = utcnow()
+        session.add(Outbox(race_uuid=race_uuid, seq=seq, queued_at=now, next_at=now))
+
+
+async def unqueued_runs(session: AsyncSession) -> list[int]:
+    """Kept runs with no outbox row yet: recorded or imported before an upstream
+    was set (pre-0.6.0 rows included), oldest first."""
+    queued = select(Outbox.race_uuid)
+    stmt = (
+        select(Race.id)
+        .where((Race.status != "running") & (Race.uuid != "") & Race.uuid.not_in(queued))
+        .order_by(Race.id)
+    )
+    return [int(i) for i in (await session.execute(stmt)).scalars().all()]
+
+
+async def due_outbox(session: AsyncSession, now: datetime, limit: int = 20) -> list[str]:
+    stmt = (
+        select(Outbox.race_uuid)
+        .where(Outbox.acked_at.is_(None) & (Outbox.terminal == "") & (Outbox.next_at <= now))
+        .order_by(Outbox.seq)
+        .limit(limit)
+    )
+    return [str(u) for u in (await session.execute(stmt)).scalars().all()]
+
+
+async def next_outbox_at(session: AsyncSession) -> datetime | None:
+    stmt = select(func.min(Outbox.next_at)).where(
+        Outbox.acked_at.is_(None) & (Outbox.terminal == "")
+    )
+    value = (await session.execute(stmt)).scalar()
+    return value if isinstance(value, datetime) else None
+
+
+async def fail_outbox(session: AsyncSession, race_uuid: str, error: str, backoff: Any) -> int:
+    row = await session.get(Outbox, race_uuid)
+    if row is None:
+        return 0
+    row.attempts += 1
+    row.last_error = error[:500]
+    row.next_at = utcnow() + backoff(row.attempts)
+    await session.commit()
+    return row.attempts
+
+
+async def finish_outbox(
+    session: AsyncSession, race_uuid: str, acked: bool = False, terminal: str = "", error: str = ""
+) -> None:
+    row = await session.get(Outbox, race_uuid)
+    if row is None:
+        return
+    if acked:
+        row.acked_at = utcnow()
+        row.last_error = ""
+    else:
+        row.terminal = terminal
+        row.last_error = error[:500]
+    await session.commit()
+
+
+async def reset_outbox_backoff(session: AsyncSession) -> None:
+    """Settings changed (a fixed token, a new address): retry everything now."""
+    await session.execute(
+        update(Outbox)
+        .where(Outbox.acked_at.is_(None) & (Outbox.terminal == ""))
+        .values(next_at=utcnow(), attempts=0)
+    )
+    await session.commit()
+
+
+async def outbox_counts(session: AsyncSession) -> tuple[int, int, datetime | None]:
+    """(pending, terminal, last ack time)."""
+    pending = (
+        await session.execute(
+            select(func.count(Outbox.race_uuid)).where(
+                Outbox.acked_at.is_(None) & (Outbox.terminal == "")
+            )
+        )
+    ).scalar()
+    terminal = (
+        await session.execute(select(func.count(Outbox.race_uuid)).where(Outbox.terminal != ""))
+    ).scalar()
+    last = (await session.execute(select(func.max(Outbox.acked_at)))).scalar()
+    return int(pending or 0), int(terminal or 0), last if isinstance(last, datetime) else None
+
+
+async def outbox_rows(session: AsyncSession, limit: int = 50) -> list[Outbox]:
+    stmt = select(Outbox).order_by(Outbox.seq.desc()).limit(limit)
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def purge_acked(session: AsyncSession) -> int:
+    """Delete every local run the web has acknowledged (no tombstones)."""
+    stmt = select(Outbox.race_uuid).where(Outbox.acked_at.is_not(None))
+    uuids = [str(u) for u in (await session.execute(stmt)).scalars().all()]
+    n = 0
+    for u in uuids:
+        race = await get_race_by_uuid(session, u)
+        if race is not None and await delete_race(session, race.id, tombstone=False):
+            n += 1
+    return n
+
+
+async def acked_count(session: AsyncSession) -> int:
+    stmt = (
+        select(func.count(Race.id))
+        .join(Outbox, Outbox.race_uuid == Race.uuid)
+        .where(Outbox.acked_at.is_not(None))
+    )
+    return int((await session.execute(stmt)).scalar() or 0)
+
+
+def _cache_key(key: PBKey) -> str:
+    return f"{key.track_id}:{key.quad_model_id}:{key.race_laps}"
+
+
+async def cache_get(session: AsyncSession, key: PBKey) -> dict[str, Any] | None:
+    row = await session.get(ReferenceCache, _cache_key(key))
+    if row is None:
+        return None
+    loaded = json.loads(row.payload)
+    return loaded if isinstance(loaded, dict) else None
+
+
+async def cache_put(session: AsyncSession, key: PBKey, payload: dict[str, Any]) -> None:
+    row = await session.get(ReferenceCache, _cache_key(key))
+    text = json.dumps(payload, separators=(",", ":"))
+    if row is None:
+        session.add(ReferenceCache(pb_key=_cache_key(key), payload=text, updated_at=utcnow()))
+    else:
+        row.payload = text
+        row.updated_at = utcnow()
+    await session.commit()
+
+
+async def reference_bundle(session: AsyncSession, key: PBKey) -> dict[str, Any]:
+    """What a node needs for one PB key: the PB and the track's gate geometry."""
+    from splitter.sync import bundle as bundles
+
+    best = await get_best_race(session, key)
+    geometry = await track_geometry(session, key.track_id) if key.valid else None
+    return bundles.build(key.track_id, key.quad_model_id, key.race_laps, best, geometry)
+
+
+async def note_node(
+    session: AsyncSession, node_id: str, name: str, seq: int, imu_seen: bool
+) -> None:
+    if not node_id:
+        return
+    now = utcnow()
+    node = await session.get(Node, node_id)
+    if node is None:
+        node = Node(node_id=node_id, name=name[:80], last_seen_at=now, max_seq=0)
+        session.add(node)
+    node.last_seen_at = now
+    if name:
+        node.name = name[:80]
+    node.max_seq = max(node.max_seq, seq)
+    if imu_seen:
+        node.imu_seen_at = now
+    await session.commit()
+
+
+@dataclass(frozen=True)
+class NodeStatus:
+    node: Node
+    runs: int
+    pending: int  # uploads the node has numbered that never arrived (or were deleted)
+
+
+async def nodes_status(session: AsyncSession) -> list[NodeStatus]:
+    nodes = list((await session.execute(select(Node).order_by(Node.name))).scalars().all())
+    out = []
+    for node in nodes:
+        runs = int(
+            (
+                await session.execute(
+                    select(func.count(Race.id)).where(
+                        (Race.node_id == node.node_id) & (Race.seq > 0)
+                    )
+                )
+            ).scalar()
+            or 0
+        )
+        gone = int(
+            (
+                await session.execute(
+                    select(func.count(RunTombstone.uuid)).where(
+                        RunTombstone.node_id == node.node_id
+                    )
+                )
+            ).scalar()
+            or 0
+        )
+        out.append(NodeStatus(node, runs, max(0, node.max_seq - runs - gone)))
+    return out

@@ -49,13 +49,17 @@
   <nav id="main-nav">
     {% set path = request.url.path %}
     <a href="/" {% if path == "/" %}class="active"{% endif %}>Live</a>
+    {% if not upstream_url or keep_local_runs %}
     <a href="/races" {% if path.startswith("/races") %}class="active"{% endif %}>Races</a>
     <a href="/tracks" {% if path.startswith("/tracks") %}class="active"{% endif %}>Tracks</a>
+    {% endif %}
+    {% if upstream_url %}<a href="{{ upstream_url }}/races" target="_blank" rel="noopener" title="the Splitter this one sends its runs to">Web ↗</a>{% endif %}
     <a href="/settings" {% if path.startswith("/settings") %}class="active"{% endif %}>Settings</a>
   </nav>
   <span class="who">
     <button type="button" class="ind" id="ind-link" data-help="link" title="this page's link to Splitter — tap for help"><span class="conn busy" id="link-dot"></span> <span class="ind-name">Splitter</span> <span id="link-label">connecting</span></button>
     <button type="button" class="ind" id="ind-game" data-help="game" title="Splitter's connection to VelociDrone — tap for help"><span class="conn {% if game_connected %}on{% endif %}" id="game-dot"></span> <span class="ind-name">Game</span> <span id="game-label">{{ "connected" if game_connected else "offline" }}</span></button>
+    {% if upstream_url %}<button type="button" class="ind" id="ind-web" data-help="sync" title="runs sent to the other Splitter — tap for help"><span class="conn unk" id="web-dot"></span> <span class="ind-name">Web</span> <span id="web-label">…</span></button>{% endif %}
   </span>
 </header>
 <main class="{% block main_class %}{% endblock %}">

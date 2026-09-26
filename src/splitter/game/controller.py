@@ -21,7 +21,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -57,7 +57,11 @@ from splitter.game.session import (
     SessionState,
 )
 from splitter.live.hub import LiveHub
+from splitter.sync import bundle as bundles
 from splitter.util import utcnow
+
+if TYPE_CHECKING:
+    from splitter.sync.uploader import Uploader
 
 log = logging.getLogger(__name__)
 
@@ -125,6 +129,10 @@ class RaceController:
         # Capture off = stay connected to the game but record nothing.
         self.capture = settings.get_bool("capture_enabled")
         self._geometry_cache: dict[int, tuple[int | None, dict[int, GatePosition]]] = {}
+        # Gate geometry from the upstream's reference bundles, by track id.
+        self._bundle_geometry: dict[int, tuple[int | None, dict[int, GatePosition]]] = {}
+        # Set by the app when sync is wired up; queues kept runs for upload.
+        self.sync: Uploader | None = None
         self.last_track_check: dict[str, Any] | None = None
         self.race_id: int | None = None
         self.race_started_at: datetime | None = None
@@ -197,6 +205,7 @@ class RaceController:
             "clients": self._hub.clients,
             "capture": self.capture,
             "track_check": self.last_track_check,
+            "sync": self.sync.status() if self.sync else None,
         }
 
     async def set_manual_session(
@@ -248,10 +257,43 @@ class RaceController:
         if self.race_active:
             return
         s = self.session
+        self.reference = await self._load_reference(
+            repos.PBKey(s.track_id, s.quad_model_id, s.race_laps)
+        )
+
+    async def _load_reference(self, key: repos.PBKey) -> Reference | None:
+        """The PB for a key: this database, the upstream's cached bundle, or both.
+
+        The web holds every node's runs; this database holds this node's, some
+        not yet acknowledged. Whichever is faster is the PB. A key the cache
+        has never seen is requested from the web (the answer arrives through
+        :meth:`on_bundle`).
+        """
         async with self._sf() as db:
-            self.reference = await repos.load_reference(
-                db, repos.PBKey(s.track_id, s.quad_model_id, s.race_laps)
-            )
+            local = await repos.load_reference(db, key)
+            cached = None
+            if self.sync is not None and self.sync.configured and key.valid:
+                payload = await repos.cache_get(db, key)
+                if payload is not None:
+                    cached = bundles.to_reference(payload)
+                    geometry = bundles.to_geometry(payload)
+                    if geometry is not None:
+                        self._bundle_geometry[key.track_id] = geometry
+                else:
+                    self.sync.request_reference(key)
+        if local is not None and cached is not None:
+            return local if local.total_ms <= cached.total_ms else cached
+        return local or cached
+
+    async def on_bundle(self, key: repos.PBKey) -> None:
+        """The uploader cached a fresh bundle; re-evaluate if it is the session's."""
+        s = self.session
+        if key != repos.PBKey(s.track_id, s.quad_model_id, s.race_laps) or self.race_active:
+            return
+        before = self.reference
+        await self.refresh_reference()
+        if self.reference != before:
+            self._hub.broadcast("reference", self._reference_dict())
 
     async def set_player_name(self, name: str) -> None:
         self.player_name = name.strip()
@@ -558,10 +600,10 @@ class RaceController:
         self._go_monotonic = time.monotonic()
         self.race_started_at = utcnow()
         s = self.session
+        self.reference = await self._load_reference(
+            repos.PBKey(s.track_id, s.quad_model_id, s.race_laps)
+        )
         async with self._sf() as db:
-            self.reference = await repos.load_reference(
-                db, repos.PBKey(s.track_id, s.quad_model_id, s.race_laps)
-            )
             race = Race(
                 uuid=repos.new_uuid(),
                 node_id=self._settings.get("node_id"),
@@ -583,7 +625,7 @@ class RaceController:
                 start_finish_gate=self.start_finish_gate,
                 status="running",
                 started_at=self.race_started_at,
-                reference_race_id=self.reference.race_id if self.reference else None,
+                reference_race_id=self._reference_row_id(),
                 reference_uuid=await self._reference_uuid(db),
             )
             db.add(race)
@@ -664,7 +706,13 @@ class RaceController:
             async with self._sf() as db:
                 self._geometry_cache[track_id] = await repos.track_geometry(db, track_id)
         count, positions = self._geometry_cache[track_id]
-        return (count, positions) if (count or positions) else None
+        if not (count or positions):
+            # Nothing traced here (runs live on the web): the bundle's geometry.
+            remote = self._bundle_geometry.get(track_id)
+            if remote is not None and (remote[0] or remote[1]):
+                return remote
+            return None
+        return (count, positions)
 
     async def _check_track(self) -> None:
         """After lap 1: does this run look like the session's track? (#5 follow-up)
@@ -784,10 +832,10 @@ class RaceController:
             source=SOURCE_MATCHED,
         )
         s = self.session
+        self.reference = await self._load_reference(
+            repos.PBKey(s.track_id, s.quad_model_id, s.race_laps)
+        )
         async with self._sf() as db:
-            self.reference = await repos.load_reference(
-                db, repos.PBKey(s.track_id, s.quad_model_id, s.race_laps)
-            )
             race = await repos.update_race(
                 db,
                 race_id,
@@ -797,7 +845,7 @@ class RaceController:
                 scene_id=s.scene_id,
                 track_source=s.track_source,
                 session_source=SOURCE_MATCHED,
-                reference_race_id=self.reference.race_id if self.reference else None,
+                reference_race_id=self._reference_row_id(),
                 reference_uuid=await self._reference_uuid(db),
             )
             if race is not None:
@@ -941,6 +989,8 @@ class RaceController:
         )
         self.last_result = result
         self._reset_race()
+        if self.sync is not None:
+            await self.sync.enqueue(race_id)
         await self.refresh_reference()  # the PB the next run is measured against
         result["next_reference"] = self._reference_dict()
         self._hub.broadcast("race_finished", result)
@@ -957,6 +1007,8 @@ class RaceController:
         ref = self.reference
         if ref is None:
             return ""
+        if ref.race_uuid:
+            return ref.race_uuid
         row = await db.get(Race, ref.race_id)
         return row.uuid if row is not None else ""
 
@@ -1003,12 +1055,18 @@ class RaceController:
             await repos.add_event_log(db, event.type, event.raw, self.race_id)
             await db.commit()
 
+    def _reference_row_id(self) -> int | None:
+        ref = self.reference
+        return ref.race_id if ref is not None and not ref.remote else None
+
     def _reference_dict(self) -> dict[str, Any] | None:
         ref = self.reference
         if ref is None:
             return None
         return {
             "race_id": ref.race_id,
+            "race_uuid": ref.race_uuid,
+            "remote": ref.remote,
             "total_ms": ref.total_ms,
             "gates_per_lap": ref.gates_per_lap,
             "crossings": len(ref.cumulative_by_seq),

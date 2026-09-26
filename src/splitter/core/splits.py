@@ -9,12 +9,14 @@ from dataclasses import dataclass, field
 class Reference:
     """The run a live race is compared against, indexed by crossing seq."""
 
-    race_id: int
+    race_id: int  # local row id; 0 when the run lives on the upstream web
     total_ms: int
     cumulative_by_seq: list[int] = field(default_factory=list)
     gate_ms_by_seq: list[int] = field(default_factory=list)
     lap_ms_by_lap: dict[int, int] = field(default_factory=dict)
     gates_per_lap: int | None = None
+    race_uuid: str = ""
+    remote: bool = False  # from the upstream's reference bundle, not this database
 
     def split_at(self, seq: int, cumulative_ms: int) -> int | None:
         """Cumulative delta at the same crossing index (negative = ahead)."""
@@ -42,6 +44,8 @@ def build_reference(
     crossings: list[tuple[int, int, int]],
     laps: list[tuple[int, int]],
     gates_per_lap: int | None,
+    race_uuid: str = "",
+    remote: bool = False,
 ) -> Reference:
     """Assemble a Reference from stored rows.
 
@@ -56,6 +60,8 @@ def build_reference(
         gate_ms_by_seq=[c[2] for c in ordered],
         lap_ms_by_lap={lap: ms for lap, ms in laps},
         gates_per_lap=gates_per_lap,
+        race_uuid=race_uuid,
+        remote=remote,
     )
 
 

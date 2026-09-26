@@ -233,6 +233,57 @@ Groundwork for capture nodes pushing runs to a web server
   arriving later back-fills references that pointed at it. `pb_delta_ms` and
   `reference_uuid` are historical facts and are never recomputed on import.
 
+## Push to an upstream web (0.7.0, sync phase 2)
+
+A node pushes runs to another Splitter, the **web**, and pulls back what the
+live page needs. Push only: the gaming PC is behind NAT. Nothing here is
+required for a run to record.
+
+- **Node side** (`sync/uploader.py::Uploader`, supervised next to the bridge;
+  `app.state.uploader`, `controller.sync`). Settings `upstream_url`,
+  `upstream_token`, `keep_local_runs` (default on), `node_seq`. Every kept
+  run is queued in `outbox` at race end (`controller._finish_race` →
+  `Uploader.enqueue`, which assigns `seq` from `node_seq`, so a zero-crossing
+  abort never leaves a gap); imported runs and runs from before the upstream
+  was set are queued too (`enqueue_all` on reconfigure, `repos.unqueued_runs`).
+  Rows are pushed oldest first with backoff 5 s → 5 min; 409 (document
+  version), 410 (tombstoned) and 422 (rejected) are **terminal** (never
+  retried, shown on Settings and in the header; `POST /api/sync/retry` requeues
+  them). A 200 carries the **reference bundle**; with `keep_local_runs` off the
+  local run is then deleted *without* a tombstone. One pass at a time
+  (`_pass_lock`); `process_once` is what tests and *Send now* call, `run` is
+  the loop. The token is only sent over https or to a private/LAN address
+  (`token_allowed`), else the status is `token_blocked`. `POST /api/sync/test
+  |flush|purge|retry`, `GET /api/sync`. Settings page section *Send runs to
+  another Splitter*; header indicator *Web* (`#web-dot`, help key `sync`),
+  painted from `snapshot.sync` and `sync` messages; nav gains *Web ↗* and drops
+  Races/Tracks only when local copies are not kept. The picker proxies through
+  the web when no private client is installed here.
+- **Reference bundle** (`sync/bundle.py`): the PB for a `PBKey` (crossings,
+  laps, `race_uuid`) plus `repos.track_geometry` for the track, cached per key
+  in `reference_cache`. `controller._load_reference` (used at GO, on idle
+  refresh and on a track switch) takes the faster of the local PB and the
+  cached one; a key the cache has never seen is requested from the web
+  (`Uploader.request_reference` → `GET /api/reference` → `controller.on_bundle`
+  broadcasts `reference`). `Reference.remote` / `race_uuid`: a remote PB gives
+  the run `reference_uuid` but no `reference_race_id`. `_track_geometry` falls
+  back to the bundle's geometry when nothing is traced locally.
+- **Web side** (`web/routes/ingest.py`): bearer `ingest_token` (Settings →
+  *Receive runs*, `POST /settings/ingest-token` generate/disable; no token =
+  403). `PUT /api/ingest/runs/{uuid}` (8 MB cap, uuid must match, one ingest at
+  a time via `app.state.ingest_lock`, `repos.import_run(origin="ingest")`,
+  `recalculate_best`, `note_node`, bundle in the response), `GET
+  /api/ingest/ping` (`version`, `doc_version`), `GET /api/reference`.
+  `run_tombstones` is written by `repos.delete_race` (default `tombstone=True`)
+  and refused by ingest (410) and import. `nodes` (name from the
+  `X-Splitter-Node` header, `max_seq`, `imu_seen_at`); the Races page shows
+  "Receiving from *name* (n runs, k pending)" where pending = `max_seq` minus
+  runs minus tombstones for that node.
+- **Tests never reach the network**: `app.state.sync_client` is a factory the
+  app hands the uploader (tests bind it to the web app with `ASGITransport`),
+  `app.state.sync_autorun = False` keeps the loop off so tests drive
+  `process_once`. `tests/test_sync.py`.
+
 ## Wire facts to remember
 
 All race-event scalars are strings (`"3"`, `"69.711"`, `"True"`), `uid` in

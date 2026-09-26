@@ -11,6 +11,12 @@
   </form>
 </div>
 
+{% if nodes %}
+<p class="small muted" id="nodes">Receiving from
+  {% for n in nodes %}<b>{{ n.node.name or n.node.node_id[:8] }}</b> ({{ n.runs }} run{{ "s" if n.runs != 1 }}{% if n.pending %}, <span class="pill warn" title="runs the node numbered that never arrived: still queued there, or deleted here">{{ n.pending }} pending</span>{% endif %}, last <time datetime="{{ utc_iso(n.node.last_seen_at) }}">{{ n.node.last_seen_at }}</time>){% if not loop.last %}, {% endif %}{% endfor %}.
+</p>
+{% endif %}
+
 {% macro race_row(r) %}
     <tr class="{% if r.is_best %}best{% endif %}" data-id="{{ r.id }}">
       <td class="sel"><input type="checkbox" name="race_ids" value="{{ r.id }}" data-track="{{ r.track_name }}" data-track-id="{{ r.track_id }}" data-quad="{{ r.quad_type }}" data-quad-model="{{ r.quad_model_id }}" data-laps="{{ r.race_laps }}" data-best="{{ 1 if r.is_best else 0 }}" data-status="{{ r.status }}">

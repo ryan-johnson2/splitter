@@ -134,9 +134,14 @@ async def _cmd_import(cfg: Config, args: argparse.Namespace) -> None:
     for name in args.files:
         loaded = json.loads(Path(name).read_text())
         docs.extend(loaded if isinstance(loaded, list) else [loaded])
-    sf = await _open(cfg)
+    from splitter.db.prepare import prepare
+
+    sf = _session_factory(cfg)
+    settings = await prepare(sf)
     async with sf() as db:
-        results = await repos.import_runs(db, docs, origin="import")
+        results = await repos.import_runs(
+            db, docs, origin="import", default_node_id=settings.get("node_id")
+        )
     for r in results:
         line = f"{r.uuid[:8]:<8} {r.status:<8}"
         print(f"{line} #{r.race_id}" if r.race_id else f"{line} {r.error}")

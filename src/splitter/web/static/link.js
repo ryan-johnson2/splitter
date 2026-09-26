@@ -8,7 +8,7 @@
   "use strict";
   var $ = function (id) { return document.getElementById(id); };
   var listeners = {}, ws = null, opened = false, game = null;
-  var link = { state: "connecting", game: null, ws: null };
+  var link = { state: "connecting", game: null, sync: null, ws: null };
 
   function paint(dotId, labelId, cls, text) {
     var dot = $(dotId), label = $(labelId);
@@ -27,6 +27,17 @@
       c.connected ? "connected" : c.state === "idle" || !c.state ? "offline" : c.state + (c.attempts ? " (" + c.attempts + ")" : ""));
     emit("game", c);
   }
+  // "Web": the upstream this node sends runs to (only rendered when one is set).
+  function renderSync(s) {
+    link.sync = s || null;
+    if (!$("web-dot")) return;
+    if (!s) { paint("web-dot", "web-label", "unk", "unknown"); return; }
+    if (!s.upstream) paint("web-dot", "web-label", "unk", "off");
+    else if (s.token_blocked) paint("web-dot", "web-label", "", "blocked");
+    else if (s.terminal) paint("web-dot", "web-label", "", s.terminal + " refused");
+    else if (s.pending) paint("web-dot", "web-label", s.last_error ? "" : "busy", s.pending + " pending");
+    else paint("web-dot", "web-label", "on", "sent");
+  }
   function emit(type, data) {
     (listeners[type] || []).forEach(function (fn) { try { fn(data); } catch (e) { console.error("link listener failed", type, e); } });
   }
@@ -38,11 +49,12 @@
     ws.onopen = function () { opened = true; renderLink("live"); emit("open"); };
     ws.onmessage = function (ev) {
       var msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
-      if (msg.type === "snapshot") renderGame(msg.data && msg.data.connection);
+      if (msg.type === "snapshot") { renderGame(msg.data && msg.data.connection); renderSync(msg.data && msg.data.sync); }
       else if (msg.type === "status") renderGame(msg.data);
+      else if (msg.type === "sync") renderSync(msg.data);
       emit(msg.type, msg.data);
     };
-    ws.onclose = function () { renderLink(opened ? "lost" : "connecting"); renderGame(null); emit("close"); setTimeout(connect, 1500); };
+    ws.onclose = function () { renderLink(opened ? "lost" : "connecting"); renderGame(null); renderSync(null); emit("close"); setTimeout(connect, 1500); };
     ws.onerror = function () { ws.close(); };
   }
   // Server-rendered game state is only trusted for a moment: if the socket has
@@ -80,6 +92,17 @@
     track: function () { return { title: "Track…", body: "Single player never tells Splitter which track you are on, so pick it here before you fly. Splitter remembers it until you change it. Runs without a track are saved but cannot be personal bests." }; },
     capture: function () { return { title: "Capture paused", body: "Splitter stays connected to the game but records nothing: no runs, no PBs, no telemetry. Use it for free flying or practice you do not want in the log. Tap <b>Resume capture</b> when you want runs recorded again." }; },
     abort: function () { return { title: "Abort", body: "Ends the current run as aborted in Splitter and tells the game to abort too. Use it if the timer keeps running after you quit or crashed out of a race." }; },
+    sync: function () {
+      var s = link.sync;
+      if (!s) return { title: "Web: unknown", body: "This page has lost Splitter, so nothing is known about the other Splitter either." };
+      var where = s.url ? ' at <code>' + esc(s.url) + '</code>' : "";
+      if (!s.upstream) return { title: "Web: off", body: "This Splitter is not sending its runs anywhere. Set it up under <a href=\"/settings#send\">Settings</a>." };
+      if (s.token_blocked) return { title: "Web: blocked", body: "The address" + where + " is plain <code>http://</code> to a public address, which would expose the token. Use <code>https://</code>, or a LAN address." };
+      var err = s.last_error ? '<p class="muted small">Last error: ' + esc(s.last_error) + "</p>" : "";
+      if (s.terminal) return { title: "Web: runs refused", body: s.terminal + " run" + (s.terminal === 1 ? "" : "s") + " will not be sent" + where + ": the other Splitter refused them (older version, or the run was deleted there). See <a href=\"/settings#send\">Settings</a>." + err };
+      if (s.pending) return { title: "Web: " + s.pending + " pending", body: "Runs waiting to be sent" + where + ". They go as soon as it can be reached; nothing is lost meanwhile." + err };
+      return { title: "Web: up to date", body: "Every run has been sent" + where + "." + (s.keep_local ? "" : " Local copies are deleted once sent.") };
+    },
     noid: function () { return { title: "No online track id", body: "This run's track has no online id, so it cannot be a personal best and has no reference. Pick the track with <b>Track…</b>, or fix it later on the Races page." }; }
   };
   var pop = null;

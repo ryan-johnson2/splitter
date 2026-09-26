@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "splitter"
-version = "0.6.0"
+version = "0.7.0"
 description = "Splitter — personal VelociDrone lap timer: gate-by-gate splits, telemetry and analysis"
 license = {text = "AGPL-3.0-or-later"}
 requires-python = ">=3.11"
@@ -21,6 +21,7 @@ dependencies = [
     "pydantic-settings>=2.4",
     "python-multipart>=0.0.9",
     "websockets>=13.0",
+    "httpx>=0.27",  # the node's uploader (sync)
 ]
 
 [project.optional-dependencies]

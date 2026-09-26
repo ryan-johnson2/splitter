@@ -23,6 +23,7 @@ async def races_page(request: Request, track: str = "", quad: str = "", status: 
         )
         tracks = await repos.distinct_tracks(db)
         quads = await repos.distinct_quads(db)
+        nodes = await repos.nodes_status(db)
     return templates.TemplateResponse(
         request,
         "races.html",
@@ -30,6 +31,7 @@ async def races_page(request: Request, track: str = "", quad: str = "", status: 
             "races": rows,
             "tracks": tracks,
             "quads": quads,
+            "nodes": nodes,
             "filter": {"track": track, "quad": quad, "status": status},
         },
     )

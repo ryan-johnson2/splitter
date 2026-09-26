@@ -22,6 +22,7 @@ from splitter.game.bridge import GameBridge
 from splitter.game.catalog import TrackCatalog
 from splitter.game.controller import RaceController
 from splitter.live.hub import LiveHub
+from splitter.sync.uploader import Uploader
 from splitter.version import __version__
 
 log = logging.getLogger(__name__)
@@ -91,7 +92,14 @@ def create_app(config: Config | None = None) -> FastAPI:
             status_provider=lambda: bridge.status(),
             resolve_track=catalog.resolve,
         )
+        # Push runs to the upstream web, if one is configured; tests inject a client.
+        uploader = Uploader(
+            settings, session_factory, hub, client_factory=getattr(app.state, "sync_client", None)
+        )
+        uploader.controller = controller
+        controller.sync = uploader
         controller.load_sticky_session()
+        await uploader.refresh_counts()
         await controller.refresh_reference()
 
         async def on_state(b: GameBridge) -> None:
@@ -107,14 +115,20 @@ def create_app(config: Config | None = None) -> FastAPI:
         app.state.hub = hub
         app.state.bridge = bridge
         app.state.controller = controller
+        app.state.uploader = uploader
 
-        task = asyncio.create_task(_supervise("game-bridge", bridge.run), name="game-bridge")
+        tasks = [asyncio.create_task(_supervise("game-bridge", bridge.run), name="game-bridge")]
+        if getattr(app.state, "sync_autorun", True):  # tests drive the uploader by hand
+            tasks.append(asyncio.create_task(_supervise("uploader", uploader.run), name="uploader"))
         try:
             yield
         finally:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+            for task in tasks:
+                task.cancel()
+            for task in tasks:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            await uploader.close()
             await engine.dispose()
 
     app = FastAPI(title="Splitter", lifespan=lifespan)
@@ -124,10 +138,11 @@ def create_app(config: Config | None = None) -> FastAPI:
         name="static",
     )
 
-    from splitter.web.routes import api, history, live, protocol, settings_page, tracks
+    from splitter.web.routes import api, history, ingest, live, protocol, settings_page, tracks
 
     app.include_router(live.router)
     app.include_router(api.router)
+    app.include_router(ingest.router)
     app.include_router(history.router)
     app.include_router(tracks.router)
     app.include_router(settings_page.router)

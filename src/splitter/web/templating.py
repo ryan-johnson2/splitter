@@ -25,6 +25,9 @@ def _site_context(request: Any) -> dict[str, Any]:
         "game_addr": f"{bridge.host}:{bridge.port}" if bridge and bridge.host else "",
         "time_format": style,
         "pace_yellow_s": settings.get_float("pace_yellow_s") if settings else 2.0,
+        # Sync: where the runs go, and whether this install keeps its own copies.
+        "upstream_url": (settings.get("upstream_url").strip() if settings else ""),
+        "keep_local_runs": settings.get_bool("keep_local_runs") if settings else True,
         # Per-request override of the global so every page honours the setting.
         "format_ms": lambda ms: format_ms(ms, style),
     }

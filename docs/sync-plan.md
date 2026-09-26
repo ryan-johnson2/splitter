@@ -1,7 +1,7 @@
 # Implementation plan: capture nodes, web server, and sync
 
-Status: plan (2026-09-25, revised 2026-09-26; phase 1 built 2026-09-26), branch
-`feature/cloud-sync`. The design is
+Status: plan (2026-09-25, revised 2026-09-26; phases 1 and 2 built 2026-09-26),
+branch `feature/cloud-sync`. The design is
 `docs/sync-design.md`; this is how it gets built, phase by phase, against the
 code as it stands at 0.5.2. Each phase ships on its own, keeps the current
 single-process app working, and is tracked by one GitHub issue.
@@ -143,7 +143,15 @@ uuid).
 A run captured on the desktop app can be exported, imported into the LXC,
 and appears there as a PB with its flight path, with no network code yet.
 
-## Phase 2: push to an upstream web (#12)
+## Phase 2: push to an upstream web (#12) — built
+
+As planned, plus: runs recorded or imported before the upstream was set are
+queued when it is (`enqueue_all`); an imported document with no node id is
+stamped with the importing install's; ingest is serialised on the web and
+uploader passes on the node (two concurrent pushes of one run must not both
+insert); Races/Tracks stay in the nav while local copies are kept, and a
+*Web ↗* link is added. The picker proxy is in but untested against a real
+private client.
 
 ### Node side
 

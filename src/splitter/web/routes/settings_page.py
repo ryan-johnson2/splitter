@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 from typing import Any
 
 from fastapi import APIRouter, Form, Request
@@ -26,8 +27,30 @@ async def settings_page(request: Request) -> Any:
             "time_formats": TIME_FORMATS,
             "bridge": state.bridge.status(),
             "controller": state.controller,
+            "sync": state.uploader.status() if hasattr(state, "uploader") else None,
+            "acked_local": await _acked_local(state),
         },
     )
+
+
+async def _acked_local(state: Any) -> int:
+    from splitter.db import repos
+
+    async with state.session_factory() as db:
+        return await repos.acked_count(db)
+
+
+@router.post("/ingest-token")
+async def ingest_token(request: Request, action: str = Form("generate")) -> Any:
+    """Turn receiving on (a fresh token), rotate it, or turn it off."""
+    state = request.app.state
+    value = secrets.token_urlsafe(32) if action == "generate" else ""
+    async with state.session_factory() as db:
+        await state.settings.set(db, "ingest_token", value)
+    note = (
+        "Receiving is on: give the token to the sending Splitter." if value else "Receiving is off."
+    )
+    return redirect_with_flash("/settings#receive", notice=note)
 
 
 @router.post("")
@@ -46,6 +69,9 @@ async def settings_save(
     time_format: str = Form("seconds"),
     pace_yellow_s: float = Form(2.0),
     show_getting_started: str = Form("0"),
+    upstream_url: str = Form(""),
+    upstream_token: str = Form(""),
+    keep_local_runs: str = Form("1"),
 ) -> Any:
     state = request.app.state
     settings = state.settings
@@ -63,12 +89,21 @@ async def settings_save(
         "time_format": time_format if time_format in TIME_FORMATS else "seconds",
         "pace_yellow_s": f"{max(0.1, min(60.0, pace_yellow_s)):g}",
         "show_getting_started": "1" if show_getting_started == "1" else "0",
+        "upstream_url": upstream_url.strip().rstrip("/"),
+        "upstream_token": upstream_token.strip(),
+        "keep_local_runs": "1" if keep_local_runs == "1" else "0",
     }
     host_changed = values["game_host"] != settings.get("game_host") or values[
         "game_port"
     ] != settings.get("game_port")
+    sync_changed = any(
+        values[k] != settings.get(k) for k in ("upstream_url", "upstream_token", "keep_local_runs")
+    )
     async with state.session_factory() as db:
         await settings.set_many(db, values)
+    if sync_changed and hasattr(state, "uploader"):
+        await state.uploader.reconfigure()
+        await state.controller.refresh_reference()
     state.controller.player_name = values["player_name"] or state.controller.player_name
     if host_changed or (values["auto_connect"] == "1" and not state.bridge.enabled):
         if values["game_host"]:

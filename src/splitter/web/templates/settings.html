@@ -35,6 +35,49 @@
   <div class="field inline"><label for="event_log_keep">Keep the newest</label><input id="event_log_keep" name="event_log_keep" type="number" min="100" value="{{ values.event_log_keep }}" style="width:7rem"> <span class="muted">frames</span></div>
 </div>
 
+<div class="card" id="send">
+  <h2>Send runs to another Splitter</h2>
+  <p class="help">Push every finished run to a Splitter that keeps all your results — the LXC or Docker one, say — so this install can be just the timer. Enter its address and the token from its <i>Receive runs</i> section. Runs recorded before the address was set are sent too.</p>
+  <div class="row" style="margin-top:.8rem">
+    <div class="field"><label for="upstream_url">Address</label><input id="upstream_url" name="upstream_url" value="{{ values.upstream_url }}" placeholder="https://splitter.example.net or http://192.168.1.10:8100"></div>
+    <div class="field"><label for="upstream_token">Token</label><input id="upstream_token" name="upstream_token" value="{{ values.upstream_token }}" autocomplete="off"></div>
+  </div>
+  <div class="field"><label class="switch"><input type="hidden" name="keep_local_runs" value="0"><input type="checkbox" name="keep_local_runs" value="1" {% if values.keep_local_runs == "1" %}checked{% endif %}> Keep a local copy of each run after it is sent</label><p class="help">Off: a run is deleted here once the other Splitter has it. Leave it on unless this install is short of space.</p></div>
+  {% if sync %}
+  <p class="small" id="sync-status">Status:
+    {% if not sync.upstream %}<span class="pill dim">not configured</span>
+    {% elif sync.token_blocked %}<span class="pill bad">blocked</span> <span class="muted">plain http to a public address would expose the token — use https</span>
+    {% elif sync.terminal %}<span class="pill bad">{{ sync.terminal }} run{{ "s" if sync.terminal != 1 }} refused</span> <span class="muted">{{ sync.last_error }}</span>
+    {% elif sync.pending %}<span class="pill warn">{{ sync.pending }} pending</span>{% if sync.last_error %} <span class="muted">{{ sync.last_error }}</span>{% endif %}
+    {% else %}<span class="pill ok">up to date</span>{% endif %}
+    {% if sync.last_ack_at %}· last sent <time datetime="{{ sync.last_ack_at }}">{{ sync.last_ack_at }}</time>{% endif %}
+  </p>
+  <div class="inline-form">
+    <button type="button" class="btn sm" id="sync-test">Test connection</button>
+    <button type="button" class="btn sm" id="sync-flush" {% if not sync.upstream %}disabled{% endif %}>Send now</button>
+    {% if sync.terminal %}<button type="button" class="btn sm" id="sync-retry">Retry refused runs</button>{% endif %}
+    {% if acked_local %}<button type="button" class="btn sm danger" id="sync-purge" data-count="{{ acked_local }}">Remove {{ acked_local }} local cop{{ "y" if acked_local == 1 else "ies" }} already sent</button>{% endif %}
+    <span class="muted small" id="sync-result"></span>
+  </div>
+  {% endif %}
+</div>
+
+<div class="card" id="receive">
+  <h2>Receive runs from other Splitters</h2>
+  <p class="help">Other installs push their runs here with this token. Leave it off unless this is the Splitter that keeps everything.</p>
+  {% if values.ingest_token %}
+  <p class="small" style="margin-top:.8rem">Token: <code id="ingest-token">{{ values.ingest_token }}</code> <button type="button" class="btn sm" onclick="navigator.clipboard && navigator.clipboard.writeText(document.getElementById('ingest-token').textContent)">Copy</button></p>
+  <p class="help">On the sending Splitter: Settings → <i>Send runs to another Splitter</i> → this address and this token.</p>
+  <div class="inline-form">
+    <button type="submit" form="ingest-form" name="action" value="generate" class="btn sm" onclick="return confirm('A new token stops every sender until they are given it. Continue?')">New token</button>
+    <button type="submit" form="ingest-form" name="action" value="disable" class="btn sm danger">Turn receiving off</button>
+  </div>
+  {% else %}
+  <p class="small" style="margin-top:.8rem"><span class="pill dim">off</span></p>
+  <button type="submit" form="ingest-form" name="action" value="generate" class="btn sm primary">Turn receiving on</button>
+  {% endif %}
+</div>
+
 <div class="card">
   <h2>About</h2>
   <div class="field"><label for="brand_name">Name in the header</label><input id="brand_name" name="brand_name" value="{{ values.brand_name }}"></div>
@@ -52,4 +95,29 @@
 
 <div class="form-actions"><button type="submit" class="primary">Save settings</button></div>
 </form>
+<form method="post" action="/settings/ingest-token" id="ingest-form"></form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    var out = document.getElementById("sync-result");
+    function say(t) { if (out) out.textContent = t; }
+    function post(url) { return fetch(url, { method: "POST" }).then(function (r) { return r.json(); }); }
+    var b;
+    if ((b = document.getElementById("sync-test"))) b.onclick = function () {
+      say("testing…");
+      var form = b.closest("form"), data = new FormData(form);
+      fetch("/settings", { method: "POST", body: new URLSearchParams(data) }).then(function () { return post("/api/sync/test"); })
+        .then(function (j) { say(j.ok ? "OK — " + (j.name || "Splitter") + " v" + j.version : "Failed: " + j.error); })
+        .catch(function (e) { say("Failed: " + e); });
+    };
+    if ((b = document.getElementById("sync-flush"))) b.onclick = function () { say("sending…"); post("/api/sync/flush").then(function (j) { say(j.pending ? j.pending + " still pending" + (j.last_error ? ": " + j.last_error : "") : "all sent"); }); };
+    if ((b = document.getElementById("sync-retry"))) b.onclick = function () { post("/api/sync/retry").then(function (j) { say(j.requeued + " queued again"); }); };
+    if ((b = document.getElementById("sync-purge"))) b.onclick = function () {
+      if (!confirm("Delete the " + b.dataset.count + " local copies the other Splitter already has? Their pages here go away; the runs stay on the other Splitter.")) return;
+      post("/api/sync/purge").then(function (j) { location.assign("/settings?notice=" + encodeURIComponent(j.deleted + " local copies removed.") + "#send"); });
+    };
+  })();
+</script>
 {% endblock %}
