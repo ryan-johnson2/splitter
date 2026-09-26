@@ -59,6 +59,7 @@
   <span class="who">
     <button type="button" class="ind" id="ind-link" data-help="link" title="this page's link to Splitter — tap for help"><span class="conn busy" id="link-dot"></span> <span class="ind-name">Splitter</span> <span id="link-label">connecting</span></button>
     <button type="button" class="ind" id="ind-game" data-help="game" title="Splitter's connection to VelociDrone — tap for help"><span class="conn {% if game_connected %}on{% endif %}" id="game-dot"></span> <span class="ind-name">Game</span> <span id="game-label">{{ "connected" if game_connected else "offline" }}</span></button>
+    <button type="button" class="ind" id="ind-imu" data-help="imu" title="no IMU data from the game — tap for help" hidden><span class="conn" id="imu-dot"></span> <span class="ind-name">IMU</span> <span id="imu-label">off</span></button>
     {% if upstream_url %}<button type="button" class="ind" id="ind-web" data-help="sync" title="runs sent to the other Splitter — tap for help"><span class="conn unk" id="web-dot"></span> <span class="ind-name">Web</span> <span id="web-label">…</span></button>{% endif %}
   </span>
 </header>

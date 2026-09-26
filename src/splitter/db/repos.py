@@ -12,8 +12,10 @@ from typing import Any
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from splitter.core import identify as identification
 from splitter.core import rundoc
 from splitter.core.crashes import Crash
+from splitter.core.fingerprint import Fingerprint
 from splitter.core.geometry import GatePosition, gate_positions
 from splitter.core.sections import Section, lap_segments
 from splitter.core.splits import Reference, build_reference
@@ -29,6 +31,7 @@ from splitter.db.models import (
     RunTombstone,
     TelemetryBlob,
     TelemetrySample,
+    TrackFingerprint,
     TrackSection,
 )
 from splitter.util import utcnow
@@ -120,6 +123,7 @@ class RaceFilters:
     quad: str = ""
     track_id: int = 0
     status: str = ""
+    unidentified: bool = False  # runs with no online track id (the review queue)
     limit: int = 100
 
 
@@ -131,6 +135,8 @@ async def list_races(session: AsyncSession, filters: RaceFilters) -> list[Race]:
         stmt = stmt.where(Race.quad_type == filters.quad)
     if filters.track_id:
         stmt = stmt.where(Race.track_id == filters.track_id)
+    if filters.unidentified:
+        stmt = stmt.where(Race.track_id == 0)
     if filters.status:
         stmt = stmt.where(Race.status == filters.status)
     stmt = stmt.order_by(Race.id.desc()).limit(filters.limit)
@@ -170,6 +176,13 @@ async def update_race(session: AsyncSession, race_id: int, **fields: Any) -> Rac
     old_key = race_key(race)
     for name, value in fields.items():
         setattr(race, name, value)
+    if fields.get("track_id", 0) > 0:
+        # The pilot said what this layout is: remember it, and a run that was
+        # never measured against a PB gets a delta now.
+        race.track_note = ""
+        await session.commit()
+        await learn_fingerprint(session, race)
+        await derive_delta(session, race)
     await session.commit()
     new_key = race_key(race)
     await recalculate_best(session, old_key)
@@ -883,3 +896,170 @@ async def nodes_status(session: AsyncSession) -> list[NodeStatus]:
         )
         out.append(NodeStatus(node, runs, max(0, node.max_seq - runs - gone)))
     return out
+
+
+# ── identification: the fingerprint registry ──────────────────────
+
+
+def fingerprint_of(race: Race) -> Fingerprint | None:
+    if not race.fingerprint:
+        return None
+    try:
+        return Fingerprint.from_dict(json.loads(race.fingerprint))
+    except (ValueError, TypeError, KeyError):
+        return None
+
+
+def _known(row: TrackFingerprint) -> identification.Known | None:
+    fp = Fingerprint.from_dict(
+        {"gates_per_lap": row.gates_per_lap, "lap": 1, "gates": json.loads(row.gates)}
+    )
+    if fp is None:
+        return None
+    return identification.known_from_fingerprint(
+        row.track_id, row.scene_id, row.track_name, row.scenery, row.track_source, fp
+    )
+
+
+async def registry_for(
+    session: AsyncSession, gates_per_lap: int
+) -> dict[int, identification.Known]:
+    """Track id → geometry for every known layout with this gate count, most
+    recently registered track first (twins are broken in favour of the newest).
+    Labelled rows win over learned ones for the same track."""
+    stmt = (
+        select(TrackFingerprint)
+        .where(TrackFingerprint.gates_per_lap == gates_per_lap)
+        .order_by(TrackFingerprint.id.desc())
+    )
+    out: dict[int, identification.Known] = {}
+    labelled: set[int] = set()
+    for row in (await session.execute(stmt)).scalars():
+        if row.track_id in labelled or (row.track_id in out and row.source != "labelled"):
+            continue
+        known = _known(row)
+        if known is None:
+            continue
+        out[row.track_id] = known
+        if row.source == "labelled":
+            labelled.add(row.track_id)
+    return out
+
+
+async def learn_fingerprint(session: AsyncSession, race: Race) -> TrackFingerprint | None:
+    """Register the run's layout under its track unless a row within the
+    track-change threshold already says so. Called when a run is attributed
+    (edit, bulk edit, ingest with a picked track, race end)."""
+    fp = fingerprint_of(race)
+    if fp is None or race.track_id <= 0 or fp.located < trackcheck_min_gates():
+        return None
+    stmt = select(TrackFingerprint).where(
+        (TrackFingerprint.track_id == race.track_id)
+        & (TrackFingerprint.gates_per_lap == fp.gates_per_lap)
+    )
+    for row in (await session.execute(stmt)).scalars():
+        known = _known(row)
+        if known is None:
+            continue
+        decision = identification.identify(fp, {race.track_id: known})
+        if decision.track is not None:
+            return None  # already known within threshold
+    row = TrackFingerprint(
+        track_id=race.track_id,
+        scene_id=race.scene_id,
+        track_name=race.track_name,
+        scenery=race.scenery,
+        track_source=race.track_source,
+        gates_per_lap=fp.gates_per_lap,
+        gates=json.dumps(fp.to_dict()["gates"]),
+        source="learned",
+        owner=race.node_id,
+        origin_race_uuid=race.uuid,
+        created_at=utcnow(),
+    )
+    session.add(row)
+    await session.commit()
+    return row
+
+
+def trackcheck_min_gates() -> int:
+    from splitter.core.trackcheck import MIN_GATES
+
+    return MIN_GATES
+
+
+async def identify_race(session: AsyncSession, race: Race) -> identification.Decision:
+    """Attribute an unidentified run from the registry; commits when it does."""
+    fp = fingerprint_of(race)
+    if race.track_id > 0 or fp is None:
+        return identification.Decision(None, False, [])
+    registry = await registry_for(session, fp.gates_per_lap)
+    decision = identification.identify(fp, registry)
+    if decision.track is not None:
+        k = decision.track
+        race.track_id = k.track_id
+        race.scene_id = k.scene_id
+        race.track_name = k.track_name
+        race.scenery = k.scenery
+        race.track_source = k.track_source
+        race.session_source = "matched"
+        race.track_note = "ambiguous" if decision.ambiguous else ""
+        await session.commit()
+        await derive_delta(session, race)
+        await recalculate_best(session, race_key(race))
+    return decision
+
+
+async def identify_unidentified(session: AsyncSession) -> int:
+    """Re-run identification over every run with no track id; returns how many
+    were attributed."""
+    rows = (
+        (
+            await session.execute(
+                select(Race)
+                .where((Race.track_id == 0) & (Race.fingerprint != ""))
+                .order_by(Race.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    n = 0
+    for race in rows:
+        if (await identify_race(session, race)).track is not None:
+            n += 1
+    return n
+
+
+async def derive_delta(session: AsyncSession, race: Race) -> None:
+    """A finished run that was never measured against a PB (no reference at GO,
+    or no track then) gets a delta against the PB as of now, marked derived."""
+    if race.status != "finished" or not race.total_time_ms or race.reference_uuid:
+        return
+    if race.pb_delta_ms is not None and race.delta_source != "derived":
+        return
+    key = race_key(race)
+    if not key.valid:
+        return
+    best = await get_best_race(session, key)
+    if best is None or best.id == race.id or not best.total_time_ms:
+        race.pb_delta_ms = None
+        race.delta_source = ""
+    else:
+        race.pb_delta_ms = race.total_time_ms - best.total_time_ms
+        race.delta_source = "derived"
+    await session.commit()
+
+
+async def unidentified_count(session: AsyncSession) -> int:
+    stmt = select(func.count(Race.id)).where((Race.track_id == 0) & (Race.status != "running"))
+    return int((await session.execute(stmt)).scalar() or 0)
+
+
+async def fingerprints_for_track(session: AsyncSession, track_id: int) -> list[TrackFingerprint]:
+    stmt = (
+        select(TrackFingerprint)
+        .where(TrackFingerprint.track_id == track_id)
+        .order_by(TrackFingerprint.id.desc())
+    )
+    return list((await session.execute(stmt)).scalars().all())

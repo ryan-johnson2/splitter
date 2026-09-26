@@ -242,6 +242,12 @@ def main(argv: list[str] | None = None) -> None:
         help="how well fingerprints separate tracks in this database (threshold spike)",
     )
     p = sub.add_parser(
+        "service",
+        help="install/remove/start/stop this install as a system service (--dry-run to see)",
+        add_help=False,
+    )
+    p.add_argument("service_args", nargs=argparse.REMAINDER)
+    p = sub.add_parser(
         "extract-catalog",
         help="regenerate the bundled quad/scene catalog from the game's settings.db",
     )
@@ -281,6 +287,10 @@ def main(argv: list[str] | None = None) -> None:
         asyncio.run(_cmd_migrate_telemetry(cfg, args))
     elif args.cmd == "backfill-fingerprints":
         asyncio.run(_cmd_backfill_fingerprints(cfg, args))
+    elif args.cmd == "service":
+        from splitter.service import main as service_main
+
+        sys.exit(service_main(args.service_args))
     elif args.cmd == "fingerprint-stats":
         from splitter.devtools.fingerprint_stats import run_stats
 

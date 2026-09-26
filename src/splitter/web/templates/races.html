@@ -6,11 +6,21 @@
     <select name="track"><option value="">all tracks</option>{% for t in tracks %}<option value="{{ t }}" {% if t == filter.track %}selected{% endif %}>{{ t }}</option>{% endfor %}</select>
     <select name="quad"><option value="">all quads</option>{% for q in quads %}<option value="{{ q }}" {% if q == filter.quad %}selected{% endif %}>{{ q }}</option>{% endfor %}</select>
     <select name="status"><option value="">any status</option>{% for s in ["finished", "aborted"] %}<option value="{{ s }}" {% if s == filter.status %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+    <select name="unidentified"><option value="0">all tracks</option><option value="1" {% if filter.unidentified %}selected{% endif %}>no track yet{% if unidentified_count %} ({{ unidentified_count }}){% endif %}</option></select>
     <button type="submit" class="btn sm">Filter</button>
     <label class="btn sm" title="import runs exported from another Splitter (JSON files)">Import…<input type="file" id="import-files" accept=".json,application/json" multiple hidden></label>
   </form>
 </div>
 
+{% if filter.unidentified %}
+<div class="card" id="review">
+  <div class="card-head"><h2>Runs with no track</h2><span class="actions"><button type="submit" form="identify-form" class="btn sm">Re-run identification</button></span></div>
+  <p class="help">Single player never names the track, so runs pushed from a Splitter with nothing picked land here. Tick the runs of one layout and pick the track in <b>Bulk edit</b> below: from then on every run with those gate positions is recognised on arrival. <span class="pill dim">ambiguous</span> marks a layout that exists under two tracks (day and night scenes, say) — check it is the right one.</p>
+</div>
+<form method="post" action="/races/identify" id="identify-form"></form>
+{% elif unidentified_count %}
+<p class="small muted"><a href="/races?unidentified=1">{{ unidentified_count }} run{{ "s" if unidentified_count != 1 }} with no track yet</a> — pick their tracks so they can be personal bests.</p>
+{% endif %}
 {% if nodes %}
 <p class="small muted" id="nodes">Receiving from
   {% for n in nodes %}<b>{{ n.node.name or n.node.node_id[:8] }}</b> ({{ n.runs }} run{{ "s" if n.runs != 1 }}{% if n.pending %}, <span class="pill warn" title="runs the node numbered that never arrived: still queued there, or deleted here">{{ n.pending }} pending</span>{% endif %}, last <time datetime="{{ utc_iso(n.node.last_seen_at) }}">{{ n.node.last_seen_at }}</time>){% if not loop.last %}, {% endif %}{% endfor %}.
@@ -22,11 +32,11 @@
       <td class="sel"><input type="checkbox" name="race_ids" value="{{ r.id }}" data-track="{{ r.track_name }}" data-track-id="{{ r.track_id }}" data-quad="{{ r.quad_type }}" data-quad-model="{{ r.quad_model_id }}" data-laps="{{ r.race_laps }}" data-best="{{ 1 if r.is_best else 0 }}" data-status="{{ r.status }}">
         <button type="button" class="since" title="select this run and every newer one">⇡</button></td>
       <td data-label="When"><a href="/races/{{ r.id }}"><time datetime="{{ utc_iso(r.started_at) }}">{{ r.started_at }}</time></a></td>
-      <td data-label="Track">{{ r.track_name or "—" }}{% if r.scenery %} <span class="muted small">{{ r.scenery }}</span>{% endif %}{% if not r.track_id %} <span class="pill bad small" title="no online track id — cannot be a PB">no id</span>{% endif %}</td>
+      <td data-label="Track">{{ r.track_name or "—" }}{% if r.scenery %} <span class="muted small">{{ r.scenery }}</span>{% endif %}{% if not r.track_id %} <span class="pill bad small" title="no online track id — cannot be a PB">no id</span>{% if r.gates_per_lap %} <span class="muted small">{{ r.gates_per_lap }} gates{% if not r.fingerprint %}, no IMU{% endif %}</span>{% endif %}{% endif %}{% if r.track_note == "ambiguous" %} <span class="pill dim small" title="this layout exists under two tracks; recognised as the most recent one">ambiguous</span>{% endif %}</td>
       <td data-label="Quad">{{ r.quad_type or "—" }}</td>
       <td data-label="Laps" class="num">{{ r.total_laps }}{% if r.race_laps %}/{{ r.race_laps }}{% endif %}</td>
       <td data-label="Time" class="num">{% if r.status == "finished" %}{{ format_ms(r.total_time_ms) }}{% else %}<span class="pill bad">aborted</span>{% endif %}</td>
-      <td data-label="vs PB" class="num {{ delta_class(r.pb_delta_ms) }}">{{ format_delta(r.pb_delta_ms) if r.status == "finished" else "" }}</td>
+      <td data-label="vs PB" class="num {{ delta_class(r.pb_delta_ms) }}" {% if r.delta_source == "derived" %}title="against the PB as of when the run arrived here, not at GO"{% endif %}>{{ format_delta(r.pb_delta_ms) if r.status == "finished" else "" }}{% if r.delta_source == "derived" and r.pb_delta_ms is not none %}<span class="muted small">*</span>{% endif %}</td>
       <td data-label="Top km/h" class="num">{{ format_speed(r.max_speed) }}</td>
       <td>{% if r.is_best %}<span class="pill accent">PB</span>{% endif %}{% if r.session_source == "manual" %}<span class="pill dim" title="track entered by hand">manual</span>{% elif r.session_source == "sticky" %}<span class="pill dim" title="track carried over from the previous run">carried</span>{% elif r.session_source == "matched" %}<span class="pill dim" title="track recognised from this run's gate positions">matched</span>{% endif %}</td>
     </tr>

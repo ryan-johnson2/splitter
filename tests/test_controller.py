@@ -151,7 +151,7 @@ async def test_single_player_without_countdown_starts_on_first_racedata(
     q = hub.subscribe()
     await controller.handle_event(h.racedata(1, 2, 1.5))
     kinds = [m["type"] for m in h.drain(q)]
-    assert kinds == ["race_started", "crossing"]
+    assert kinds == ["race_started", "imu_warning", "crossing"]  # no IMU frames in this test
     assert controller.race_active
     snap = controller.snapshot()
     assert snap["session"]["track_name"] == "Manual Track" and snap["session"]["source"] == "manual"
@@ -562,3 +562,19 @@ async def test_track_ever_set_flips_once_and_survives_an_unset(
     assert settings.get_bool("track_ever_set")
     await controller.clear_session()
     assert not controller.session.known and settings.get_bool("track_ever_set")
+
+
+async def test_missing_imu_is_flagged_and_clears_on_the_first_frame(
+    controller: RaceController, hub: LiveHub
+) -> None:
+    await controller.handle_event(h.session())
+    q = hub.subscribe()
+    await fly(controller)  # no IMU frames at all
+    warnings = [m["data"] for m in h.drain(q) if m["type"] == "imu_warning"]
+    assert warnings == [{"missing": True}]
+    assert controller.snapshot()["imu_missing"] is True
+    q = hub.subscribe()
+    await fly(controller, imu=True)
+    warnings = [m["data"] for m in h.drain(q) if m["type"] == "imu_warning"]
+    assert warnings == [{"missing": False}]
+    assert controller.snapshot()["imu_missing"] is False

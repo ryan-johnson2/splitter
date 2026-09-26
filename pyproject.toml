@@ -27,6 +27,8 @@ dependencies = [
 [project.optional-dependencies]
 # The online track picker. Private package; see README "What is not in this repo".
 tracks = ["velocidrone-tracks"]
+# `splitter-sidecar --service` (Windows service mode, see splitter/service.py).
+service = ["pywin32>=306; sys_platform == 'win32'"]
 
 [project.scripts]
 splitter = "splitter.manage:main"
@@ -78,4 +80,9 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 # Generated at build time by scripts/stamp.py; absent in a checkout.
 module = ["splitter._stamp"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Windows service mode (pywin32), only importable on Windows.
+module = ["servicemanager", "win32event", "win32service", "win32serviceutil"]
 ignore_missing_imports = true

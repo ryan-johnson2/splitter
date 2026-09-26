@@ -93,7 +93,14 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8100, help="0 = ephemeral")
     p.add_argument("--parent-pid", type=int, default=0, help="exit when this process dies")
+    p.add_argument(
+        "--service",
+        action="store_true",
+        help="run as a Windows service (started by the Service Control Manager)",
+    )
     args = p.parse_args(argv)
+    if args.service:
+        return _run_as_windows_service(args)
     if args.parent_pid:
         threading.Thread(target=_watch_parent, args=(args.parent_pid,), daemon=True).start()
 
@@ -115,18 +122,95 @@ def main(argv: list[str] | None = None) -> None:
     async def serve() -> None:
         server = uvicorn.Server(uvicorn.Config(app, host=cfg.host, port=cfg.port, log_level="info"))
 
-        # Announce once the socket is bound; the shell watches for this line.
+        # Announce once the socket is bound; the shell watches for this line, and
+        # node.port / node.pid in the data dir let a later window find a server
+        # that is already running (the service) instead of starting a second one.
         async def announce() -> None:
             while not server.started:
                 await asyncio.sleep(0.05)
             print(f"SPLITTER_READY http://127.0.0.1:{cfg.port}/", flush=True)
+            _write_marker(cfg.data_path, cfg.port)
 
-        await asyncio.gather(server.serve(), announce())
+        try:
+            await asyncio.gather(server.serve(), announce())
+        finally:
+            _remove_marker(cfg.data_path)
 
     try:
         asyncio.run(serve())
     except KeyboardInterrupt:
         sys.exit(0)
+
+
+def _write_marker(data_dir: Path, port: int) -> None:
+    with contextlib.suppress(OSError):
+        data_dir.mkdir(parents=True, exist_ok=True)
+        (data_dir / "node.port").write_text(str(port))
+        (data_dir / "node.pid").write_text(str(os.getpid()))
+
+
+def _remove_marker(data_dir: Path) -> None:
+    for name in ("node.port", "node.pid"):
+        with contextlib.suppress(OSError):
+            (data_dir / name).unlink()
+
+
+def _run_as_windows_service(args: argparse.Namespace) -> None:
+    """Service mode: the SCM handshake around the same server (needs pywin32).
+
+    Untested outside Windows; the spike in docs/sync-plan.md phase 3. Runs the
+    server in a thread and stops it when the SCM says so.
+    """
+    try:
+        import servicemanager
+        import win32event
+        import win32service
+        import win32serviceutil
+    except ImportError:
+        raise SystemExit("service mode needs pywin32 (pip install pywin32)") from None
+
+    data_dir = args.data_dir
+
+    class SplitterService(win32serviceutil.ServiceFramework):  # type: ignore[misc]
+        _svc_name_ = "Splitter"
+        _svc_display_name_ = "Splitter lap timer"
+
+        def __init__(self, sargs: object) -> None:
+            super().__init__(sargs)
+            self.stop_event = win32event.CreateEvent(None, 0, 0, None)
+            self.server: uvicorn.Server | None = None
+
+        def SvcStop(self) -> None:
+            self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+            if self.server is not None:
+                self.server.should_exit = True
+            win32event.SetEvent(self.stop_event)
+
+        def SvcDoRun(self) -> None:
+            servicemanager.LogInfoMsg("Splitter service starting")
+            if data_dir:
+                Path(data_dir).mkdir(parents=True, exist_ok=True)
+                os.environ["SPLITTER_DATA_DIR"] = data_dir
+            os.environ.setdefault("HOST", "0.0.0.0")
+            os.environ["SPLITTER_DESKTOP"] = "1"
+            port = _free_port("0.0.0.0", 8100)
+            os.environ["PORT"] = str(port)
+            from splitter.app import create_app
+            from splitter.config import Config
+
+            cfg = Config()
+            self.server = uvicorn.Server(
+                uvicorn.Config(create_app(cfg), host=cfg.host, port=cfg.port, log_level="info")
+            )
+            _write_marker(cfg.data_path, cfg.port)
+            try:
+                self.server.run()
+            finally:
+                _remove_marker(cfg.data_path)
+
+    servicemanager.Initialize()
+    servicemanager.PrepareToHostSingle(SplitterService)
+    servicemanager.StartServiceCtrlDispatcher()
 
 
 if __name__ == "__main__":

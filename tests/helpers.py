@@ -127,3 +127,20 @@ def two_lap_race(base: float = 0.0, scale: float = 1.0) -> list[tuple[int, int, 
         (2, 4, t[6], False),
         (2, 5, t[7], True),  # finish
     ]
+
+
+def n_gate_race(
+    gates: int = 5, laps: int = 2, base: float = 0.0, scale: float = 1.0
+) -> list[tuple[int, int, float, bool]]:
+    """Like :func:`two_lap_race` for any gate count: holeshot at 1 s, the first
+    S/F at 2 s, then a crossing every 2 s. Total = 2 + laps * gates * 2 seconds."""
+    out: list[tuple[int, int, float, bool]] = [(0, 1, base + 1.0 * scale, False)]
+    t = 2.0
+    for lap in range(1, laps + 1):
+        out.append((lap, 2, base + t * scale, False))
+        t += 2.0
+        for gate in range(3, gates + 2):
+            out.append((lap, gate, base + t * scale, False))
+            t += 2.0
+    out.append((laps, gates + 2, base + t * scale, True))
+    return out

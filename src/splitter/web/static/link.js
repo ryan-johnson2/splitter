@@ -27,6 +27,13 @@
       c.connected ? "connected" : c.state === "idle" || !c.state ? "offline" : c.state + (c.attempts ? " (" + c.attempts + ")" : ""));
     emit("game", c);
   }
+  // "IMU": shown only while runs are arriving without telemetry (the game's
+  // Websocket IMU option is off); telemetry, fingerprints and crashes need it.
+  function renderImu(missing) {
+    link.imuMissing = !!missing;
+    var b = $("ind-imu");
+    if (b) b.hidden = !missing;
+  }
   // "Web": the upstream this node sends runs to (only rendered when one is set).
   function renderSync(s) {
     link.sync = s || null;
@@ -49,7 +56,8 @@
     ws.onopen = function () { opened = true; renderLink("live"); emit("open"); };
     ws.onmessage = function (ev) {
       var msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
-      if (msg.type === "snapshot") { renderGame(msg.data && msg.data.connection); renderSync(msg.data && msg.data.sync); }
+      if (msg.type === "snapshot") { renderGame(msg.data && msg.data.connection); renderSync(msg.data && msg.data.sync); renderImu(msg.data && msg.data.imu_missing); }
+      else if (msg.type === "imu_warning") renderImu(msg.data && msg.data.missing);
       else if (msg.type === "status") renderGame(msg.data);
       else if (msg.type === "sync") renderSync(msg.data);
       emit(msg.type, msg.data);
@@ -92,6 +100,7 @@
     track: function () { return { title: "Track…", body: "Single player never tells Splitter which track you are on, so pick it here before you fly. Splitter remembers it until you change it. Runs without a track are saved but cannot be personal bests." }; },
     capture: function () { return { title: "Capture paused", body: "Splitter stays connected to the game but records nothing: no runs, no PBs, no telemetry. Use it for free flying or practice you do not want in the log. Tap <b>Resume capture</b> when you want runs recorded again." }; },
     abort: function () { return { title: "Abort", body: "Ends the current run as aborted in Splitter and tells the game to abort too. Use it if the timer keeps running after you quit or crashed out of a race." }; },
+    imu: function () { return { title: "No IMU data", body: "Runs are being recorded, but the game is not sending IMU (position and speed) data, so there is no telemetry, no flight path, no crash detection, and other Splitters cannot recognise the track from the run.<ul><li>In VelociDrone: <i>Options → Main Settings → Websocket IMU Data</i> → Yes, then <b>restart the game</b>.</li><li>IMU is only sent for Betaflight-type quads.</li><li>Splitter: Settings → Telemetry → <i>Record telemetry</i> must be on (it is, or this would not show).</li></ul>This goes away by itself once frames arrive." }; },
     sync: function () {
       var s = link.sync;
       if (!s) return { title: "Web: unknown", body: "This page has lost Splitter, so nothing is known about the other Splitter either." };

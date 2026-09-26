@@ -84,8 +84,17 @@ async def ingest_run(request: Request, uuid: str) -> JSONResponse:
         if result.status == "rejected":
             raise HTTPException(422, result.error)
         assert result.key is not None
-        if result.status == "created":
-            await repos.recalculate_best(db, result.key)
+        identified = None
+        if result.status == "created" and result.race_id is not None:
+            race = await repos.get_race(db, result.race_id)
+            assert race is not None
+            if race.track_id > 0:
+                await repos.learn_fingerprint(db, race)  # the node picked it: remember the layout
+            else:
+                identified = await repos.identify_race(db, race)
+            await repos.derive_delta(db, race)
+            await repos.recalculate_best(db, repos.race_key(race))
+            result = repos.ImportResult(race.uuid, "created", race.id, key=repos.race_key(race))
         await repos.note_node(
             db,
             node_id=str(doc.get("node_id") or ""),
@@ -93,9 +102,27 @@ async def ingest_run(request: Request, uuid: str) -> JSONResponse:
             seq=int(doc.get("seq") or 0),
             imu_seen=bool((doc.get("telemetry") or {}).get("samples")),
         )
-        bundle = await repos.reference_bundle(db, result.key)
+        key = result.key
+        assert key is not None
+        bundle = await repos.reference_bundle(db, key)
     await request.app.state.controller.refresh_reference()
-    return JSONResponse({"status": result.status, "race_id": result.race_id, "reference": bundle})
+    found = identified.track if identified is not None else None
+    return JSONResponse(
+        {
+            "status": result.status,
+            "race_id": result.race_id,
+            "reference": bundle,
+            "identified": (
+                {
+                    "track_id": found.track_id,
+                    "track_name": found.track_name,
+                    "ambiguous": bool(identified and identified.ambiguous),
+                }
+                if found is not None
+                else None
+            ),
+        }
+    )
 
 
 @router.get("/reference")

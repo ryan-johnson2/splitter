@@ -81,6 +81,11 @@ class Race(Base):
     crash_count: Mapped[int] = mapped_column(default=0)
     # Layout fingerprint (core/fingerprint.py), JSON, "" when the run had no trace.
     fingerprint: Mapped[str] = mapped_column(Text, default="")
+    # Set by the web: "ambiguous" (twins), "" otherwise. Shown in the review queue.
+    track_note: Mapped[str] = mapped_column(default="")
+    # "derived" when pb_delta_ms was filled in against the PB as of ingest or
+    # identification rather than at GO (a historical fact otherwise).
+    delta_source: Mapped[str] = mapped_column(default="")
 
     laps: Mapped[list[Lap]] = relationship(
         cascade="all, delete-orphan", order_by="Lap.lap", lazy="selectin"
@@ -252,3 +257,25 @@ class Node(Base):
     last_seen_at: Mapped[datetime]
     max_seq: Mapped[int] = mapped_column(default=0)
     imu_seen_at: Mapped[datetime | None]
+
+
+class TrackFingerprint(Base):
+    """The layout registry: a known track's gate count and gate positions
+    (``core/fingerprint.py``). ``learned`` rows come from runs a pilot attributed;
+    ``labelled`` rows from the cluster labelling view. Anonymous geometry only."""
+
+    __tablename__ = "track_fingerprints"
+    __table_args__ = (Index("ix_track_fingerprints_gates", "gates_per_lap"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    track_id: Mapped[int]
+    scene_id: Mapped[int] = mapped_column(default=0)
+    track_name: Mapped[str] = mapped_column(default="")
+    scenery: Mapped[str] = mapped_column(default="")
+    track_source: Mapped[str] = mapped_column(default="")
+    gates_per_lap: Mapped[int]
+    gates: Mapped[str] = mapped_column(Text)  # JSON [[x,y,z]|null, ...] by lap-relative gate
+    source: Mapped[str] = mapped_column(default="learned")  # learned | labelled
+    owner: Mapped[str] = mapped_column(default="")  # node id (learned); "" = global
+    origin_race_uuid: Mapped[str] = mapped_column(default="")
+    created_at: Mapped[datetime]

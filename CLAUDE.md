@@ -284,6 +284,48 @@ required for a run to record.
   `app.state.sync_autorun = False` keeps the loop off so tests drive
   `process_once`. `tests/test_sync.py`.
 
+## Identification on the web, IMU warning, service (sync phase 3, in progress)
+
+- **Fingerprint registry** (`track_fingerprints`, `db/repos.py` "identification"):
+  one row per known layout (`track_id`, scene, names, `gates_per_lap`, gate
+  positions JSON, `source` learned|labelled, `owner` node id,
+  `origin_race_uuid`). `learn_fingerprint(race)` adds a row for an attributed
+  run with a fingerprint unless one within the track-change threshold already
+  covers that track; called at race end (`_finish_race`), on ingest when the
+  node had picked the track, and from `update_race` whenever a `track_id` is
+  set (edit, bulk edit, apply-to-run). `registry_for(gates)` gives track id →
+  geometry, newest first, labelled beating learned.
+- **Identification** (`core/identify.py::identify`, pure, over
+  `trackcheck.rank/decide`): a clear winner (runner-up ≥ `CLOSE_M` worse)
+  attributes; twins are attributed to the newest registry entry and flagged
+  `races.track_note = "ambiguous"`. `repos.identify_race` does it for one
+  unidentified run at ingest (`session_source` `matched`, PB re-flagged),
+  `identify_unidentified` for the whole queue (`POST /races/identify`, the
+  *Re-run identification* button). Only runs with `track_id` 0 are identified;
+  a node's own pick is trusted. Needs ≥ 4 located gates (`trackcheck.MIN_GATES`).
+- **Derived deltas**: `repos.derive_delta` fills `pb_delta_ms` against the PB
+  as of ingest/identification for finished runs that had no reference at GO,
+  marking `delta_source = "derived"` (shown with `*` on the Races page). Never
+  touches a delta measured at GO.
+- **Review queue**: `/races?unidentified=1` (`RaceFilters.unidentified`), the
+  "no track yet" filter option with a count, gate count and "no IMU" beside
+  unidentified rows, the *ambiguous* pill. Attribute by bulk edit; the registry
+  learns; re-run picks up the rest.
+- **IMU warning** (node): `controller.imu_missing` flips on at the first
+  crossing with telemetry on and no frame since GO (`imu_warning` message, log
+  warning), off on the next frame. Snapshot `imu_missing`; header button
+  `#ind-imu` (hidden unless missing), help key `imu`. No OS notification yet.
+- **`splitter service install|remove|status|start|stop [--dry-run]`**
+  (`splitter/service.py`): renders and registers a systemd system unit, a
+  launchd daemon, or `sc create` for `splitter-sidecar --service` (Windows
+  service mode in `desktop_entry.py::_run_as_windows_service`, pywin32 via the
+  `service` extra, **untested on Windows**: the phase 3 spike). The sidecar
+  writes `node.port` / `node.pid` in the data dir while bound.
+- **Not built yet** (rest of #13): the installer (Tauri NSIS bundle with
+  service hooks), the window attaching to a running service via `node.port`,
+  the service's data dir migration from a portable install, the OS
+  notification for missing IMU.
+
 ## Wire facts to remember
 
 All race-event scalars are strings (`"3"`, `"69.711"`, `"True"`), `uid` in

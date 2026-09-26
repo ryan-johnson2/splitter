@@ -16,14 +16,20 @@ router = APIRouter(prefix="/races")
 
 
 @router.get("", response_class=HTMLResponse)
-async def races_page(request: Request, track: str = "", quad: str = "", status: str = "") -> Any:
+async def races_page(
+    request: Request, track: str = "", quad: str = "", status: str = "", unidentified: int = 0
+) -> Any:
     async with request.app.state.session_factory() as db:
         rows = await repos.list_races(
-            db, repos.RaceFilters(track=track, quad=quad, status=status, limit=200)
+            db,
+            repos.RaceFilters(
+                track=track, quad=quad, status=status, unidentified=bool(unidentified), limit=200
+            ),
         )
         tracks = await repos.distinct_tracks(db)
         quads = await repos.distinct_quads(db)
         nodes = await repos.nodes_status(db)
+        unidentified_count = await repos.unidentified_count(db)
     return templates.TemplateResponse(
         request,
         "races.html",
@@ -32,9 +38,26 @@ async def races_page(request: Request, track: str = "", quad: str = "", status: 
             "tracks": tracks,
             "quads": quads,
             "nodes": nodes,
-            "filter": {"track": track, "quad": quad, "status": status},
+            "unidentified_count": unidentified_count,
+            "filter": {
+                "track": track,
+                "quad": quad,
+                "status": status,
+                "unidentified": bool(unidentified),
+            },
         },
     )
+
+
+@router.post("/identify")
+async def races_identify(request: Request) -> Any:
+    """Re-run layout identification over every run with no track (the review
+    queue), after the registry has learned something new."""
+    async with request.app.state.session_factory() as db:
+        n = await repos.identify_unidentified(db)
+    await request.app.state.controller.refresh_reference()
+    note = f"Identified {n} run{'s' if n != 1 else ''}." if n else "Nothing new recognised."
+    return redirect_with_flash("/races?unidentified=1", notice=note)
 
 
 @router.get("/{race_id}", response_class=HTMLResponse)

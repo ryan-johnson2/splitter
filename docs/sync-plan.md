@@ -226,7 +226,16 @@ The LXC is the web, the desktop app is a node, and a run flown on the PC
 shows up on the LXC's Races page in seconds with the PC keeping only its
 outbox and reference cache.
 
-## Phase 3: the node as a service, identification on the web (#13)
+## Phase 3: the node as a service, identification on the web (#13) — web side built
+
+Built 2026-09-26: the registry, identification at ingest, learning from every
+attributed run (including a node's own pick at ingest and race end), derived
+deltas, the review queue with re-run, twins flagged, the IMU warning in the
+header, `splitter service` with dry-run for systemd / launchd / `sc`, the
+sidecar's Windows service mode (pywin32, untested), and `node.port` /
+`node.pid`. Still to do: the NSIS installer with service hooks, the shell
+attaching to a running service, data-dir migration from a portable install,
+the OS notification. Those need a Windows machine to finish and verify.
 
 ### Node
 

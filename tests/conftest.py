@@ -12,6 +12,8 @@ from splitter.game.catalog import TrackRef
 from splitter.game.controller import RaceController
 from splitter.live.hub import LiveHub
 
+pytest_plugins = ["tests.sync_fixtures"]
+
 # What the online lists "know" in tests: exact-name → id, like TrackCatalog.resolve.
 KNOWN_TRACKS: dict[str, TrackRef] = {
     "practice loop": TrackRef("community", 500, 29, "Practice Loop", "Beginner", "Ryan"),

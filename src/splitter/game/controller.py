@@ -144,6 +144,9 @@ class RaceController:
         self.player_name = ""
         self.imu_frames = 0
         self.imu_last_at: datetime | None = None
+        # A run reached a gate with telemetry on but no IMU frame since GO: the
+        # game's Websocket IMU option is off. Cleared by the next frame.
+        self.imu_missing = False
         self._go_monotonic = 0.0
         self._imu_last_logged = 0.0
         self._imu_last_broadcast = 0.0
@@ -202,6 +205,7 @@ class RaceController:
             "reference": self._reference_dict(),
             "last_result": self.last_result,
             "imu": {"frames": self.imu_frames, "last_at": _iso(self.imu_last_at)},
+            "imu_missing": self.imu_missing and self._settings.get_bool("telemetry_enabled"),
             "clients": self._hub.clients,
             "capture": self.capture,
             "track_check": self.last_track_check,
@@ -574,6 +578,9 @@ class RaceController:
         sample = self.telemetry.add(
             t_ms, data.position, data.speed, (data.roll, data.pitch, data.yaw), data.attitude
         )
+        if self.imu_missing:
+            self.imu_missing = False
+            self._hub.broadcast("imu_warning", {"missing": False})
         if now - self._imu_last_broadcast >= 1.0 / LIVE_TELEMETRY_HZ:
             self._imu_last_broadcast = now
             self._hub.broadcast(
@@ -652,6 +659,18 @@ class RaceController:
     async def _on_crossing(self, crossing: Crossing) -> None:
         if self.race_id is None or self.tracker is None:
             return
+        if (
+            not self.telemetry.samples
+            and not self.imu_missing
+            and self._settings.get_bool("telemetry_enabled")
+        ):
+            self.imu_missing = True
+            log.warning(
+                "race %d reached a gate with no IMU frames: enable Websocket IMU Data in "
+                "the game (and restart it) for telemetry, fingerprints and crash detection",
+                self.race_id,
+            )
+            self._hub.broadcast("imu_warning", {"missing": True})
         ref = self.reference
         prev_cum = crossing.cumulative_ms - crossing.gate_ms
         gate_stats = self.telemetry.segment(prev_cum, crossing.cumulative_ms)
@@ -949,6 +968,8 @@ class RaceController:
             )
             race.fingerprint = json.dumps(fp.to_dict()) if fp else ""
             await db.commit()
+            if race.track_id > 0:
+                await repos.learn_fingerprint(db, race)
             self._geometry_cache.pop(race.track_id, None)
             is_best = False
             if not aborted:
