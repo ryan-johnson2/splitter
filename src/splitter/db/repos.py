@@ -3,18 +3,30 @@
 from __future__ import annotations
 
 import json
+import uuid as uuidlib
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from splitter.core import rundoc
 from splitter.core.crashes import Crash
 from splitter.core.geometry import GatePosition, gate_positions
 from splitter.core.sections import Section, lap_segments
 from splitter.core.splits import Reference, build_reference
-from splitter.db.models import EventLog, GateTime, Lap, Race, TelemetrySample, TrackSection
+from splitter.core.telemetry import COLUMNS, ENCODING, Sample, decode_columns, encode_columns
+from splitter.db.models import (
+    EventLog,
+    GateTime,
+    Lap,
+    Race,
+    TelemetryBlob,
+    TelemetrySample,
+    TrackSection,
+)
 from splitter.util import utcnow
 
 
@@ -130,6 +142,7 @@ async def delete_race(session: AsyncSession, race_id: int) -> bool:
         return False
     key = race_key(race)
     await session.execute(delete(TelemetrySample).where(TelemetrySample.race_id == race_id))
+    await session.execute(delete(TelemetryBlob).where(TelemetryBlob.race_id == race_id))
     await session.delete(race)
     await session.commit()
     await recalculate_best(session, key)
@@ -257,13 +270,200 @@ async def races_for_key(session: AsyncSession, key: PBKey) -> list[Race]:
     return list((await session.execute(stmt)).scalars().all())
 
 
-async def telemetry_for_race(session: AsyncSession, race_id: int) -> list[TelemetrySample]:
+async def telemetry_for_race(session: AsyncSession, race_id: int) -> list[Sample]:
+    """The stored trace, time-ordered: the blob when there is one, else legacy rows."""
+    blob = await session.get(TelemetryBlob, race_id)
+    if blob is not None:
+        return decode_columns(blob.data, blob.samples, blob.encoding)
+    return _samples_from_rows(await _telemetry_rows(session, race_id))
+
+
+async def _telemetry_rows(session: AsyncSession, race_id: int) -> list[TelemetrySample]:
     stmt = (
         select(TelemetrySample)
         .where(TelemetrySample.race_id == race_id)
         .order_by(TelemetrySample.t_ms)
     )
     return list((await session.execute(stmt)).scalars().all())
+
+
+def _samples_from_rows(rows: Sequence[TelemetrySample]) -> list[Sample]:
+    return [
+        Sample(
+            t_ms=r.t_ms,
+            x=r.x,
+            y=r.y,
+            z=r.z,
+            vx=r.vx,
+            vy=r.vy,
+            vz=r.vz,
+            speed=r.speed,
+            roll=r.roll,
+            pitch=r.pitch,
+            yaw=r.yaw,
+            qx=r.qx,
+            qy=r.qy,
+            qz=r.qz,
+            qw=r.qw,
+        )
+        for r in rows
+    ]
+
+
+def telemetry_blob(race_id: int, samples: Sequence[Sample], hz: float) -> TelemetryBlob:
+    return TelemetryBlob(
+        race_id=race_id,
+        hz=hz,
+        samples=len(samples),
+        columns=json.dumps(list(COLUMNS)),
+        encoding=ENCODING,
+        data=encode_columns(samples),
+    )
+
+
+async def migrate_telemetry(session: AsyncSession, batch: int = 50) -> int:
+    """Convert legacy ``telemetry`` rows into blobs, ``batch`` races at a time.
+
+    Each race is converted and its rows deleted in one transaction, so an
+    interrupted run resumes where it stopped. Returns races converted; call
+    again until it returns 0.
+    """
+    stmt = (
+        select(TelemetrySample.race_id)
+        .group_by(TelemetrySample.race_id)
+        .order_by(TelemetrySample.race_id)
+        .limit(batch)
+    )
+    race_ids = [int(r) for r in (await session.execute(stmt)).scalars().all()]
+    done = 0
+    for race_id in race_ids:
+        if await session.get(TelemetryBlob, race_id) is None:
+            rows = await _telemetry_rows(session, race_id)
+            samples = _samples_from_rows(rows)
+            hz = 0.0
+            if len(samples) > 1:
+                span = (samples[-1].t_ms - samples[0].t_ms) / 1000
+                hz = round(len(samples) / span, 1) if span > 0 else 0.0
+            session.add(telemetry_blob(race_id, samples, hz))
+        await session.execute(delete(TelemetrySample).where(TelemetrySample.race_id == race_id))
+        await session.commit()
+        done += 1
+    return done
+
+
+async def legacy_telemetry_rows(session: AsyncSession) -> int:
+    return int((await session.execute(select(func.count(TelemetrySample.id)))).scalar() or 0)
+
+
+# ── identity, export, import ──────────────────────────────────────
+
+
+def new_uuid() -> str:
+    return uuidlib.uuid4().hex
+
+
+async def backfill_identity(session: AsyncSession, node_id: str) -> int:
+    """Give every run from before 0.6.0 a uuid and this node's id; returns rows touched.
+
+    ``reference_uuid`` is filled from ``reference_race_id`` where that row still
+    exists. Idempotent: only rows with an empty uuid are touched.
+    """
+    rows = (await session.execute(select(Race).where(Race.uuid == ""))).scalars().all()
+    for r in rows:
+        r.uuid = new_uuid()
+        r.node_id = r.node_id or node_id
+    if rows:
+        await session.commit()
+    stmt = select(Race).where((Race.reference_uuid == "") & (Race.reference_race_id.is_not(None)))
+    refs = (await session.execute(stmt)).scalars().all()
+    for r in refs:
+        ref = await session.get(Race, r.reference_race_id)
+        if ref is not None and ref.uuid:
+            r.reference_uuid = ref.uuid
+    if refs:
+        await session.commit()
+    return len(rows)
+
+
+async def get_race_by_uuid(session: AsyncSession, uuid: str) -> Race | None:
+    if not uuid:
+        return None
+    return (await session.execute(select(Race).where(Race.uuid == uuid))).scalars().first()
+
+
+async def export_run(session: AsyncSession, race: Race, splitter_version: str) -> dict[str, Any]:
+    """The run document for a race (see ``core/rundoc.py``)."""
+    blob = await session.get(TelemetryBlob, race.id)
+    if blob is None and race.telemetry_samples:
+        # Legacy rows not yet migrated: pack them on the way out.
+        samples = _samples_from_rows(await _telemetry_rows(session, race.id))
+        blob = telemetry_blob(race.id, samples, 0.0) if samples else None
+    return rundoc.build(race, blob, splitter_version)
+
+
+@dataclass(frozen=True)
+class ImportResult:
+    uuid: str
+    status: str  # created | exists | rejected
+    race_id: int | None = None
+    error: str = ""
+    key: PBKey | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"uuid": self.uuid, "status": self.status, "race_id": self.race_id}
+        if self.error:
+            d["error"] = self.error
+        return d
+
+
+async def import_run(session: AsyncSession, doc: Any, origin: str = "import") -> ImportResult:
+    """Insert one run document; a uuid already on file is a no-op.
+
+    Does not re-flag PBs: the caller does ``recalculate_best`` once per key
+    after a batch. ``reference_uuid`` is resolved to a local row when that run
+    is here, else left for later.
+    """
+    try:
+        parsed = rundoc.parse(doc)
+    except rundoc.DocumentError as e:
+        uuid = doc.get("uuid") if isinstance(doc, dict) and isinstance(doc.get("uuid"), str) else ""
+        return ImportResult(uuid or "", "rejected", error=str(e))
+    existing = await get_race_by_uuid(session, parsed.uuid)
+    if existing is not None:
+        return ImportResult(parsed.uuid, "exists", existing.id, key=race_key(existing))
+    fields = dict(parsed.race)
+    fields["origin"] = origin
+    fields["received_at"] = utcnow()
+    fields["is_best"] = False
+    fields["seq"] = parsed.seq
+    ref = await get_race_by_uuid(session, fields.get("reference_uuid") or "")
+    fields["reference_race_id"] = ref.id if ref else None
+    race = Race(**fields)
+    session.add(race)
+    await session.flush()
+    session.add_all(Lap(race_id=race.id, **lap) for lap in parsed.laps)
+    session.add_all(GateTime(race_id=race.id, **g) for g in parsed.gate_times)
+    if parsed.telemetry is not None:
+        parsed.telemetry.race_id = race.id
+        session.add(parsed.telemetry)
+    # Runs imported earlier that referenced this one by uuid can now join to it.
+    await session.execute(
+        update(Race)
+        .where((Race.reference_uuid == race.uuid) & (Race.reference_race_id.is_(None)))
+        .values(reference_race_id=race.id)
+    )
+    await session.commit()
+    return ImportResult(race.uuid, "created", race.id, key=race_key(race))
+
+
+async def import_runs(
+    session: AsyncSession, docs: Sequence[Any], origin: str = "import"
+) -> list[ImportResult]:
+    """Import many documents and re-flag PBs once per touched key."""
+    results = [await import_run(session, doc, origin) for doc in docs]
+    for key in {r.key for r in results if r.status == "created" and r.key}:
+        await recalculate_best(session, key)
+    return results
 
 
 async def add_event_log(
@@ -373,12 +573,15 @@ async def races_with_telemetry(session: AsyncSession, race_ids: list[int]) -> li
     """Subset of ``race_ids`` that have a stored trace."""
     if not race_ids:
         return []
-    stmt = (
+    blobs = select(TelemetryBlob.race_id).where(TelemetryBlob.race_id.in_(race_ids))
+    found = {int(r) for r in (await session.execute(blobs)).scalars().all()}
+    rows = (
         select(TelemetrySample.race_id)
         .where(TelemetrySample.race_id.in_(race_ids))
         .group_by(TelemetrySample.race_id)
     )
-    return [int(r) for r in (await session.execute(stmt)).scalars().all()]
+    found |= {int(r) for r in (await session.execute(rows)).scalars().all()}
+    return [i for i in race_ids if i in found]
 
 
 async def track_geometry(

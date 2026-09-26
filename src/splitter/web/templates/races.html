@@ -7,6 +7,7 @@
     <select name="quad"><option value="">all quads</option>{% for q in quads %}<option value="{{ q }}" {% if q == filter.quad %}selected{% endif %}>{{ q }}</option>{% endfor %}</select>
     <select name="status"><option value="">any status</option>{% for s in ["finished", "aborted"] %}<option value="{{ s }}" {% if s == filter.status %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
     <button type="submit" class="btn sm">Filter</button>
+    <label class="btn sm" title="import runs exported from another Splitter (JSON files)">Import…<input type="file" id="import-files" accept=".json,application/json" multiple hidden></label>
   </form>
 </div>
 
@@ -76,6 +77,26 @@
 </form>
 {% endblock %}
 {% block scripts %}
+<script>
+  // Import: read the chosen documents here, post them as one JSON list, then
+  // reload with the outcome as a flash (works on an empty database too).
+  document.getElementById("import-files").addEventListener("change", function (ev) {
+    var files = Array.prototype.slice.call(ev.target.files || []);
+    if (!files.length) return;
+    Promise.all(files.map(function (f) { return f.text().then(JSON.parse); })).then(function (docs) {
+      var flat = [];
+      docs.forEach(function (d) { if (Array.isArray(d)) flat = flat.concat(d); else flat.push(d); });
+      return fetch("/api/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(flat) });
+    }).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.detail || r.status); return j; }); })
+      .then(function (j) {
+        var msg = "Imported " + j.created + " run" + (j.created === 1 ? "" : "s");
+        if (j.exists) msg += ", " + j.exists + " already here";
+        if (j.rejected) msg += ", " + j.rejected + " rejected (" + j.results.filter(function (x) { return x.error; }).map(function (x) { return x.error; }).slice(0, 2).join("; ") + ")";
+        location.assign("/races?" + (j.created || !j.rejected ? "notice=" : "error=") + encodeURIComponent(msg + "."));
+      })
+      .catch(function (e) { location.assign("/races?error=" + encodeURIComponent("Import failed: " + (e.message || e) + ".")); });
+  });
+</script>
 {% if races %}
 <script src="/static/picker.js?v={{ app_version }}"></script>
 <script src="/static/races.js?v={{ app_version }}"></script>

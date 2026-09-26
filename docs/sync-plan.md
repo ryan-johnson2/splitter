@@ -1,6 +1,7 @@
 # Implementation plan: capture nodes, web server, and sync
 
-Status: plan (2026-09-25, revised 2026-09-26), branch `feature/cloud-sync`. The design is
+Status: plan (2026-09-25, revised 2026-09-26; phase 1 built 2026-09-26), branch
+`feature/cloud-sync`. The design is
 `docs/sync-design.md`; this is how it gets built, phase by phase, against the
 code as it stands at 0.5.2. Each phase ships on its own, keeps the current
 single-process app working, and is tracked by one GitHub issue.
@@ -46,7 +47,12 @@ single-process app working, and is tracked by one GitHub issue.
 - **No two-way sync, ever.** Edits and deletes happen on the web after the
   run is acknowledged. A node never re-uploads an acknowledged run.
 
-## Phase 1: run identity and the run document (#11)
+## Phase 1: run identity and the run document (#11) — built
+
+As planned, with two changes found while building: `db/prepare.py` is the
+one place startup *and* the CLI prepare a database (a run exported from the
+command line must carry the same uuid the app gave it), and the telemetry
+migration lives there rather than in the app alone.
 
 Everything else depends on this, and it is useful alone: results can be
 exported from the LXC and imported on a laptop, or vice versa.

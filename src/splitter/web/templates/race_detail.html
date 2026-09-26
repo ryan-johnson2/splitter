@@ -5,6 +5,7 @@
 <div class="page-head">
   <h1>{{ race.track_name or "Unknown track" }} <span class="muted">#{{ race.id }}</span></h1>
   {% if race.is_best %}<span class="pill accent">personal best</span>{% elif race.status == "aborted" %}<span class="pill bad">aborted</span>{% endif %}
+  <span class="actions"><a class="btn sm" href="/api/races/{{ race.id }}/export" download title="this run as one JSON file; import it on another Splitter from the Races page">Export</a></span>
   <p class="sub"><time datetime="{{ utc_iso(race.started_at) }}">{{ race.started_at }}</time>{% if race.scenery %} · {{ race.scenery }}{% endif %}{% if race.quad_type %} · {{ race.quad_type }}{% if race.quad_size %} {{ race.quad_size }}"{% endif %}{% endif %}{% if race.race_mode %} · {{ mode_label(race.race_mode) }}{% endif %}{% if race.player_name %} · {{ race.player_name }}{% endif %}</p>
 </div>
 

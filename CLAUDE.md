@@ -196,6 +196,43 @@ to the event log at most once per 5 s.
 - Desktop hides the footer *health* link (`html.desktop #link-health`): bare
   JSON in a window with no back button.
 
+## Run identity and the run document (0.6.0, sync phase 1)
+
+Groundwork for capture nodes pushing runs to a web server
+(`docs/sync-design.md`, plan in `docs/sync-plan.md`, issues #10–#16).
+
+- **Identity.** `races.uuid` (`uuid4().hex`, minted at GO), `node_id` (this
+  install's id, minted once into the `node_id` setting), `seq` (per-node
+  upload counter, assigned by the outbox in phase 2, 0 until then), `origin`
+  (`capture` / `import` / `ingest`), `received_at` (import/ingest only) and
+  `reference_uuid` beside `reference_race_id`. `db/prepare.py::prepare` is
+  what every process runs first: `init_db` (which also creates indexes added
+  after a DB was made), node id, `repos.backfill_identity` for pre-0.6.0
+  rows, and the telemetry migration. The app's lifespan and every CLI
+  command that touches data go through it.
+- **Telemetry blob.** `telemetry_blobs` holds one compressed columnar blob per
+  race (`core/telemetry.py::encode_columns`, `cols1+zlib`: `t_ms` int32 then
+  float32 columns, little-endian). `repos.telemetry_for_race` returns
+  `core.telemetry.Sample`s from the blob, falling back to legacy `telemetry`
+  rows; `prepare` converts rows to blobs in batches of 50 (resumable) and
+  `splitter migrate-telemetry --drop` removes the empty table.
+- **Fingerprint.** `core/fingerprint.py::compute` = gates per lap + the
+  drone's position at each gate of the fastest crash-free lap (lap 1 as the
+  fallback), stored as JSON on `races.fingerprint` at race end so it
+  survives without the trace; `splitter backfill-fingerprints` does older
+  runs from their traces, `splitter fingerprint-stats` reports how well the
+  fingerprints in a DB separate its tracks (the threshold spike for phase 3).
+- **Document.** `core/rundoc.py::build/parse`, `DOC_VERSION` 1: uuid, node,
+  seq, every `races` column except local ids and `is_best`, laps, gate
+  times, crashes, fingerprint, the telemetry blob base64. Columns come from
+  the ORM, so new columns ride along; unknown keys are ignored. `GET
+  /api/races/{id}/export` (Export on the race page), `POST /api/import` (one
+  or a list; Import… on the Races page; `repos.import_runs` re-flags PBs once
+  per touched key), `splitter export|import`. Idempotent by uuid; a
+  `reference_uuid` resolves to a local row when that run is here, and a run
+  arriving later back-fills references that pointed at it. `pb_delta_ms` and
+  `reference_uuid` are historical facts and are never recomputed on import.
+
 ## Wire facts to remember
 
 All race-event scalars are strings (`"3"`, `"69.711"`, `"True"`), `uid` in

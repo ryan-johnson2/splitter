@@ -18,10 +18,19 @@ def _session_factory(cfg: Config) -> Any:
     return create_session_factory(create_engine(cfg.database_url))
 
 
+async def _open(cfg: Config) -> Any:
+    """Session factory over a prepared database (schema, node id, backfills)."""
+    from splitter.db.prepare import prepare
+
+    sf = _session_factory(cfg)
+    await prepare(sf)
+    return sf
+
+
 async def _cmd_races(cfg: Config, args: argparse.Namespace) -> None:
     from splitter.db import repos
 
-    sf = _session_factory(cfg)
+    sf = await _open(cfg)
     async with sf() as db:
         rows = await repos.list_races(
             db, repos.RaceFilters(track=args.track or "", limit=args.limit)
@@ -37,11 +46,9 @@ async def _cmd_races(cfg: Config, args: argparse.Namespace) -> None:
 
 
 async def _cmd_settings(cfg: Config, args: argparse.Namespace) -> None:
-    from splitter.db.engine import init_db
     from splitter.db.runtime_settings import RuntimeSettings
 
-    sf = _session_factory(cfg)
-    await init_db(sf.kw["bind"])
+    sf = await _open(cfg)
     settings = RuntimeSettings()
     async with sf() as db:
         await settings.load(db)
@@ -62,11 +69,9 @@ async def _cmd_backfill_crashes(cfg: Config, args: argparse.Namespace) -> None:
 
     from splitter.core import crashes as crash_detect
     from splitter.db import repos
-    from splitter.db.engine import init_db
     from splitter.db.models import Race
 
-    sf = _session_factory(cfg)
-    await init_db(sf.kw["bind"])
+    sf = await _open(cfg)
     async with sf() as db:
         stmt = select(Race).where(Race.telemetry_samples > 0).order_by(Race.id)
         if not args.all:
@@ -90,6 +95,110 @@ async def _cmd_backfill_crashes(cfg: Config, args: argparse.Namespace) -> None:
     print(f"scanned {runs} runs, found {crashes} crashes")
 
 
+async def _cmd_export(cfg: Config, args: argparse.Namespace) -> None:
+    """Write one document per run into a directory."""
+    import json
+    from datetime import datetime
+    from pathlib import Path
+
+    from sqlalchemy import select
+
+    from splitter.db import repos
+    from splitter.db.models import Race
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    sf = await _open(cfg)
+    async with sf() as db:
+        stmt = select(Race).where(Race.status != "running").order_by(Race.id)
+        if args.since:
+            stmt = stmt.where(Race.started_at >= datetime.fromisoformat(args.since))
+        elif not args.all:
+            raise SystemExit("say --all or --since YYYY-MM-DD")
+        n = 0
+        for race in (await db.execute(stmt)).scalars():
+            doc = await repos.export_run(db, race, __version__)
+            name = f"splitter-run-{race.started_at:%Y%m%d-%H%M%S}-{race.uuid[:8]}.json"
+            (out / name).write_text(json.dumps(doc, separators=(",", ":")))
+            n += 1
+    print(f"wrote {n} runs to {out}")
+
+
+async def _cmd_import(cfg: Config, args: argparse.Namespace) -> None:
+    import json
+    from pathlib import Path
+
+    from splitter.db import repos
+
+    docs = []
+    for name in args.files:
+        loaded = json.loads(Path(name).read_text())
+        docs.extend(loaded if isinstance(loaded, list) else [loaded])
+    sf = await _open(cfg)
+    async with sf() as db:
+        results = await repos.import_runs(db, docs, origin="import")
+    for r in results:
+        line = f"{r.uuid[:8]:<8} {r.status:<8}"
+        print(f"{line} #{r.race_id}" if r.race_id else f"{line} {r.error}")
+    statuses = ("created", "exists", "rejected")
+    counts = {s: sum(1 for r in results if r.status == s) for s in statuses}
+    print(", ".join(f"{v} {k}" for k, v in counts.items()))
+
+
+async def _cmd_migrate_telemetry(cfg: Config, args: argparse.Namespace) -> None:
+    """Convert legacy telemetry rows to blobs (startup does this too); --drop the table."""
+    from sqlalchemy import text
+
+    from splitter.db import repos
+
+    sf = await _open(cfg)  # the conversion itself happens in prepare()
+    engine = sf.kw["bind"]
+    async with sf() as db:
+        left = await repos.legacy_telemetry_rows(db)
+    print(f"{left} legacy telemetry rows left")
+    if args.drop:
+        if left:
+            raise SystemExit("legacy rows remain; not dropping")
+        async with engine.begin() as conn:
+            await conn.execute(text("DROP TABLE IF EXISTS telemetry"))
+        print("dropped the telemetry table (it is recreated empty at next start)")
+
+
+async def _cmd_backfill_fingerprints(cfg: Config, args: argparse.Namespace) -> None:
+    """Fingerprint runs that were recorded before fingerprints existed, from their traces."""
+    import json
+
+    from sqlalchemy import select
+
+    from splitter.core import fingerprint as fingerprinting
+    from splitter.db import repos
+    from splitter.db.models import Race
+
+    sf = await _open(cfg)
+    async with sf() as db:
+        stmt = select(Race).where(Race.telemetry_samples > 0).order_by(Race.id)
+        if not args.all:
+            stmt = stmt.where(Race.fingerprint == "")
+        races = list((await db.execute(stmt)).scalars().all())
+        done = 0
+        for race in races:
+            samples = await repos.telemetry_for_race(db, race.id)
+            fp = fingerprinting.compute(
+                race.gate_times,
+                race.gates_per_lap,
+                samples,
+                [(lap.lap, lap.lap_ms) for lap in race.laps],
+                [c.lap for c in repos.crashes_of(race)],
+            )
+            race.fingerprint = json.dumps(fp.to_dict()) if fp else ""
+            done += bool(fp)
+            if args.verbose:
+                where = f"lap {fp.lap}, {fp.located}/{fp.gates_per_lap} gates" if fp else "none"
+                print(f"#{race.id:<5} {race.track_name[:30]:<30} {where}")
+        await db.commit()
+    print(f"scanned {len(races)} runs, fingerprinted {done}")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="splitter", description="Splitter — VelociDrone lap timer"
@@ -108,6 +217,25 @@ def main(argv: list[str] | None = None) -> None:
     )
     p.add_argument("--all", action="store_true", help="re-scan runs already analysed")
     p.add_argument("-v", "--verbose", action="store_true")
+    p = sub.add_parser("export", help="write every run as a document (JSON) into a directory")
+    p.add_argument("-o", "--out", required=True)
+    p.add_argument("--all", action="store_true")
+    p.add_argument("--since", default="", help="runs started on or after this date (ISO)")
+    p = sub.add_parser("import", help="import run documents (files or lists of them)")
+    p.add_argument("files", nargs="+")
+    p = sub.add_parser(
+        "migrate-telemetry", help="convert legacy telemetry rows to blobs; --drop the old table"
+    )
+    p.add_argument("--drop", action="store_true")
+    p = sub.add_parser(
+        "backfill-fingerprints", help="fingerprint older runs from their stored traces"
+    )
+    p.add_argument("--all", action="store_true", help="recompute runs that already have one")
+    p.add_argument("-v", "--verbose", action="store_true")
+    p = sub.add_parser(
+        "fingerprint-stats",
+        help="how well fingerprints separate tracks in this database (threshold spike)",
+    )
     p = sub.add_parser(
         "extract-catalog",
         help="regenerate the bundled quad/scene catalog from the game's settings.db",
@@ -140,6 +268,18 @@ def main(argv: list[str] | None = None) -> None:
         asyncio.run(_cmd_settings(cfg, args))
     elif args.cmd == "backfill-crashes":
         asyncio.run(_cmd_backfill_crashes(cfg, args))
+    elif args.cmd == "export":
+        asyncio.run(_cmd_export(cfg, args))
+    elif args.cmd == "import":
+        asyncio.run(_cmd_import(cfg, args))
+    elif args.cmd == "migrate-telemetry":
+        asyncio.run(_cmd_migrate_telemetry(cfg, args))
+    elif args.cmd == "backfill-fingerprints":
+        asyncio.run(_cmd_backfill_fingerprints(cfg, args))
+    elif args.cmd == "fingerprint-stats":
+        from splitter.devtools.fingerprint_stats import run_stats
+
+        asyncio.run(run_stats(_open(cfg)))
     elif args.cmd == "extract-catalog":
         from pathlib import Path
 

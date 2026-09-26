@@ -39,13 +39,14 @@ from velocidrone_ws import (
 )
 
 from splitter.core import crashes as crash_detect
+from splitter.core import fingerprint as fingerprinting
 from splitter.core import geometry, quads, sections, trackcheck
 from splitter.core.geometry import GatePosition
 from splitter.core.splits import Reference
 from splitter.core.telemetry import SegmentStats, TelemetryBuffer
 from splitter.core.timing import Crossing, RaceTracker
 from splitter.db import repos
-from splitter.db.models import GateTime, Lap, Race, TelemetrySample
+from splitter.db.models import GateTime, Lap, Race
 from splitter.db.runtime_settings import RuntimeSettings
 from splitter.game.catalog import TrackRef
 from splitter.game.session import (
@@ -562,6 +563,9 @@ class RaceController:
                 db, repos.PBKey(s.track_id, s.quad_model_id, s.race_laps)
             )
             race = Race(
+                uuid=repos.new_uuid(),
+                node_id=self._settings.get("node_id"),
+                origin="capture",
                 track_name=s.track_name,
                 scenery=s.scenery,
                 track_id=s.track_id,
@@ -580,6 +584,7 @@ class RaceController:
                 status="running",
                 started_at=self.race_started_at,
                 reference_race_id=self.reference.race_id if self.reference else None,
+                reference_uuid=await self._reference_uuid(db),
             )
             db.add(race)
             await db.commit()
@@ -793,6 +798,7 @@ class RaceController:
                 track_source=s.track_source,
                 session_source=SOURCE_MATCHED,
                 reference_race_id=self.reference.race_id if self.reference else None,
+                reference_uuid=await self._reference_uuid(db),
             )
             if race is not None:
                 await self._rebase_splits(db, race_id)
@@ -881,6 +887,19 @@ class RaceController:
             )
             race.crashes = json.dumps([c.to_dict() for c in found])
             race.crash_count = len(found)
+            fp = fingerprinting.compute(
+                [
+                    _CrossingRef(
+                        c.seq, c.lap, c.lap_done.lap if c.lap_done else None, c.cumulative_ms
+                    )
+                    for c in tracker.crossings
+                ],
+                tracker.gates_per_lap,
+                self.telemetry.samples,
+                [(lap.lap, lap.lap_ms) for lap in tracker.laps],
+                [c.lap for c in found],
+            )
+            race.fingerprint = json.dumps(fp.to_dict()) if fp else ""
             await db.commit()
             self._geometry_cache.pop(race.track_id, None)
             is_best = False
@@ -931,28 +950,15 @@ class RaceController:
             return 0
         hz = self._settings.get_float("telemetry_store_hz")
         rows = self.telemetry.downsampled(hz)
-        db.add_all(
-            TelemetrySample(
-                race_id=race_id,
-                t_ms=s.t_ms,
-                x=s.x,
-                y=s.y,
-                z=s.z,
-                vx=s.vx,
-                vy=s.vy,
-                vz=s.vz,
-                speed=s.speed,
-                roll=s.roll,
-                pitch=s.pitch,
-                yaw=s.yaw,
-                qx=s.qx,
-                qy=s.qy,
-                qz=s.qz,
-                qw=s.qw,
-            )
-            for s in rows
-        )
+        db.add(repos.telemetry_blob(race_id, rows, hz))
         return len(rows)
+
+    async def _reference_uuid(self, db: AsyncSession) -> str:
+        ref = self.reference
+        if ref is None:
+            return ""
+        row = await db.get(Race, ref.race_id)
+        return row.uuid if row is not None else ""
 
     def _reset_race(self) -> None:
         self.last_track_check = None

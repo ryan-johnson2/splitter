@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Index, Text
+from sqlalchemy import ForeignKey, Index, LargeBinary, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -29,9 +29,18 @@ class Race(Base):
     __table_args__ = (
         Index("ix_races_track_quad", "track_name", "quad_type", "race_laps"),
         Index("ix_races_pb_key", "track_id", "quad_model_id", "race_laps"),
+        Index("ix_races_uuid", "uuid"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Identity minted where the run was captured (docs/sync-design.md). ``uuid``
+    # is what other installs know the run by; ``node_id`` the capturing install;
+    # ``seq`` its per-node upload counter (0 = pre-sync or not yet queued).
+    uuid: Mapped[str] = mapped_column(default="")
+    node_id: Mapped[str] = mapped_column(default="")
+    seq: Mapped[int] = mapped_column(default=0)
+    origin: Mapped[str] = mapped_column(default="capture")  # capture | import | ingest
+    received_at: Mapped[datetime | None]  # when an import/ingest landed here; never for capture
     track_name: Mapped[str] = mapped_column(default="")
     scenery: Mapped[str] = mapped_column(default="")
     # Online track identity when the session came from the picker (else 0 / "").
@@ -59,7 +68,8 @@ class Race(Base):
     total_laps: Mapped[int] = mapped_column(default=0)
     gates_per_lap: Mapped[int | None]
     is_best: Mapped[bool] = mapped_column(default=False)
-    reference_race_id: Mapped[int | None]  # the PB this run was compared against
+    reference_race_id: Mapped[int | None]  # the PB this run was compared against (local row)
+    reference_uuid: Mapped[str] = mapped_column(default="")  # ...and its portable identity
     pb_delta_ms: Mapped[int | None]  # total vs reference at the time
     telemetry_samples: Mapped[int] = mapped_column(default=0)
     max_speed: Mapped[float | None]
@@ -69,6 +79,8 @@ class Race(Base):
     # Crashes found in the trace (core/crashes.py), JSON list of Crash dicts.
     crashes: Mapped[str] = mapped_column(Text, default="")
     crash_count: Mapped[int] = mapped_column(default=0)
+    # Layout fingerprint (core/fingerprint.py), JSON, "" when the run had no trace.
+    fingerprint: Mapped[str] = mapped_column(Text, default="")
 
     laps: Mapped[list[Lap]] = relationship(
         cascade="all, delete-orphan", order_by="Lap.lap", lazy="selectin"
@@ -134,8 +146,26 @@ class TrackSection(Base):
     updated_at: Mapped[datetime]
 
 
+class TelemetryBlob(Base):
+    """The downsampled IMU trace of one race as one compressed columnar blob
+    (``core/telemetry.py::encode_columns``). Replaces ``telemetry`` rows."""
+
+    __tablename__ = "telemetry_blobs"
+
+    race_id: Mapped[int] = mapped_column(
+        ForeignKey("races.id", ondelete="CASCADE"), primary_key=True
+    )
+    hz: Mapped[float]
+    samples: Mapped[int]
+    columns: Mapped[str] = mapped_column(Text)  # JSON list of column names, in blob order
+    encoding: Mapped[str]
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+
+
 class TelemetrySample(Base):
-    """Downsampled IMU trace for one race (position, velocity, rates, attitude)."""
+    """Downsampled IMU trace, one row per sample. Legacy: converted to
+    ``telemetry_blobs`` at startup (``repos.migrate_telemetry``) and kept only
+    until ``splitter migrate-telemetry --drop``."""
 
     __tablename__ = "telemetry"
     __table_args__ = (Index("ix_telemetry_race", "race_id", "t_ms"),)

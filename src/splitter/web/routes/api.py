@@ -5,11 +5,15 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from splitter.core import quads
 from splitter.db import repos
 from splitter.game.catalog import SOURCES, SearchResult
+from splitter.version import __version__
+
+MAX_IMPORT_DOCS = 500
 
 router = APIRouter(prefix="/api")
 
@@ -206,9 +210,45 @@ async def delete_race(request: Request, race_id: int) -> dict[str, Any]:
     return {"ok": True}
 
 
+@router.get("/races/{race_id}/export")
+async def export_race(request: Request, race_id: int) -> JSONResponse:
+    """The run as one document (``core/rundoc.py``); ``POST /api/import`` takes it anywhere."""
+    async with request.app.state.session_factory() as db:
+        r = await repos.get_race(db, race_id)
+        if r is None:
+            raise HTTPException(404)
+        if r.status == "running":
+            raise HTTPException(409, "the run is still going")
+        doc = await repos.export_run(db, r, __version__)
+    name = f"splitter-run-{r.started_at:%Y%m%d-%H%M%S}-{r.uuid[:8]}.json"
+    return JSONResponse(doc, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@router.post("/import")
+async def import_races(request: Request) -> dict[str, Any]:
+    """Import one run document or a list of them. Idempotent by uuid: a run
+    already here is reported as ``exists`` and left alone."""
+    try:
+        body = await request.json()
+    except ValueError as e:
+        raise HTTPException(400, f"body is not JSON: {e}") from e
+    docs = body if isinstance(body, list) else [body]
+    if len(docs) > MAX_IMPORT_DOCS:
+        raise HTTPException(413, f"at most {MAX_IMPORT_DOCS} documents per request")
+    async with request.app.state.session_factory() as db:
+        results = await repos.import_runs(db, docs, origin="import")
+    await request.app.state.controller.refresh_reference()
+    statuses = ("created", "exists", "rejected")
+    counts = {s: sum(1 for r in results if r.status == s) for s in statuses}
+    return {"results": [r.to_dict() for r in results], **counts}
+
+
 def _race_dict(r: Any) -> dict[str, Any]:
     return {
         "id": r.id,
+        "uuid": r.uuid,
+        "node_id": r.node_id,
+        "origin": r.origin,
         "track_name": r.track_name,
         "scenery": r.scenery,
         "track_id": r.track_id,
@@ -237,5 +277,6 @@ def _race_dict(r: Any) -> dict[str, Any]:
         "avg_speed": r.avg_speed,
         "distance_m": r.distance_m,
         "telemetry_samples": r.telemetry_samples,
+        "crash_count": r.crash_count,
         "notes": r.notes,
     }

@@ -16,8 +16,8 @@ from fastapi.staticfiles import StaticFiles
 from splitter.config import Config
 from splitter.core import netinfo, quads
 from splitter.db import repos
-from splitter.db.engine import create_engine, create_session_factory, init_db
-from splitter.db.runtime_settings import RuntimeSettings
+from splitter.db.engine import create_engine, create_session_factory
+from splitter.db.prepare import prepare
 from splitter.game.bridge import GameBridge
 from splitter.game.catalog import TrackCatalog
 from splitter.game.controller import RaceController
@@ -51,12 +51,9 @@ def create_app(config: Config | None = None) -> FastAPI:
             level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
         )
         engine = create_engine(cfg.database_url)
-        await init_db(engine)
         session_factory = create_session_factory(engine)
-
-        settings = RuntimeSettings()
+        settings = await prepare(session_factory)
         async with session_factory() as session:
-            await settings.load(session)
             # Any race left "running" by a crash is an abort.
             for race in await repos.list_races(session, repos.RaceFilters(status="running")):
                 race.status = "aborted"

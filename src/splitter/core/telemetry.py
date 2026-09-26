@@ -9,6 +9,8 @@ downsampled trace for the flight-path and speed views.
 from __future__ import annotations
 
 import math
+import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 
@@ -134,3 +136,91 @@ def segment_stats(window: list[Sample]) -> SegmentStats | None:
         min_accel=min(accels) if accels else None,
         max_accel=max(accels) if accels else None,
     )
+
+
+# ── columnar storage ──────────────────────────────────────────────
+#
+# A trace is stored (and shipped in the run document) as one compressed blob:
+# every column of every sample, column-major, ``t_ms`` as int32 and the rest as
+# float32, little-endian, zlib. Roughly a fifth of the size of a row per sample
+# before SQLite's own overhead, and the same bytes on disk and on the wire.
+
+COLUMNS: tuple[str, ...] = (
+    "t_ms",
+    "x",
+    "y",
+    "z",
+    "vx",
+    "vy",
+    "vz",
+    "speed",
+    "roll",
+    "pitch",
+    "yaw",
+    "qx",
+    "qy",
+    "qz",
+    "qw",
+)
+ENCODING = "cols1+zlib"
+
+
+def encode_columns(samples: Sequence[Sample]) -> bytes:
+    """Pack samples into the ``cols1+zlib`` blob (empty bytes for no samples)."""
+    import zlib
+    from array import array
+
+    if not samples:
+        return b""
+    parts: list[bytes] = []
+    for name in COLUMNS:
+        values = [getattr(s, name) for s in samples]
+        arr = array("i", [int(v) for v in values]) if name == "t_ms" else array("f", values)
+        if sys.byteorder == "big":
+            arr.byteswap()
+        parts.append(arr.tobytes())
+    return zlib.compress(b"".join(parts), 6)
+
+
+def decode_columns(data: bytes, count: int, encoding: str = ENCODING) -> list[Sample]:
+    """Unpack a blob written by :func:`encode_columns`; raises ``ValueError`` on
+    a size mismatch or an encoding this build does not know."""
+    import zlib
+    from array import array
+
+    if encoding != ENCODING:
+        raise ValueError(f"unknown telemetry encoding {encoding!r}")
+    if count <= 0 or not data:
+        return []
+    raw = zlib.decompress(data)
+    width = 4  # int32 and float32 are both four bytes
+    if len(raw) != width * count * len(COLUMNS):
+        raise ValueError("telemetry blob does not match its sample count")
+    columns: list[list[float]] = []
+    for i, name in enumerate(COLUMNS):
+        chunk = raw[i * width * count : (i + 1) * width * count]
+        arr = array("i" if name == "t_ms" else "f")
+        arr.frombytes(chunk)
+        if sys.byteorder == "big":
+            arr.byteswap()
+        columns.append(list(arr))
+    return [
+        Sample(
+            t_ms=int(columns[0][j]),
+            x=columns[1][j],
+            y=columns[2][j],
+            z=columns[3][j],
+            vx=columns[4][j],
+            vy=columns[5][j],
+            vz=columns[6][j],
+            speed=columns[7][j],
+            roll=columns[8][j],
+            pitch=columns[9][j],
+            yaw=columns[10][j],
+            qx=columns[11][j],
+            qy=columns[12][j],
+            qz=columns[13][j],
+            qw=columns[14][j],
+        )
+        for j in range(count)
+    ]

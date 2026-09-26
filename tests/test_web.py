@@ -528,3 +528,50 @@ async def test_health_link_can_be_hidden_in_the_desktop_shell(client: AsyncClien
     assert 'id="link-health"' in html
     css = (await client.get("/static/app.css")).text
     assert "html.desktop #link-health { display:none; }" in css
+
+
+async def test_export_and_import_endpoints(client: AsyncClient, tmp_path: Any) -> None:
+    controller = client.app.state.controller  # type: ignore[attr-defined]
+    await controller.handle_event(h.session())
+    await controller.handle_event(h.status("start"))
+    await controller.handle_event(h.countdown(0))
+    for lap, gate, t, fin in h.two_lap_race():
+        await controller.handle_event(h.racedata(lap, gate, t, fin))
+    await controller.handle_event(h.status("race finished"))
+
+    r = await client.get("/api/races/1/export")
+    assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
+    doc = r.json()
+    assert doc["uuid"] and doc["race"]["track_id"] == 500
+    assert (await client.get("/api/races/9/export")).status_code == 404
+    assert 'href="/api/races/1/export"' in (await client.get("/races/1")).text
+    assert 'id="import-files"' in (await client.get("/races")).text
+
+    # A second app, empty: import the document, then a faster one from the same track.
+    app2 = create_app(Config(database_url=f"sqlite+aiosqlite:///{tmp_path}/web2.db"))
+    app2.state.catalog = _FakeCatalog()
+    async with (
+        app2.router.lifespan_context(app2),
+        AsyncClient(transport=ASGITransport(app=app2), base_url="http://t2") as c2,
+    ):
+        r = await c2.post("/api/import", json=doc)
+        assert r.status_code == 200 and r.json()["created"] == 1
+        r = await c2.post("/api/import", json=[doc])
+        assert r.json()["exists"] == 1 and r.json()["created"] == 0
+        races = (await c2.get("/api/races")).json()
+        assert len(races) == 1 and races[0]["is_best"] and races[0]["origin"] == "import"
+        assert races[0]["uuid"] == doc["uuid"]
+        # The imported run is the reference for the next local run here.
+        assert app2.state.controller.snapshot()["reference"] is None  # no session yet
+        await app2.state.controller.handle_event(h.session())
+        assert app2.state.controller.snapshot()["reference"]["total_ms"] == 14000
+        faster = dict(doc, uuid="b" * 32, race=dict(doc["race"], total_time_ms=13000))
+        r = await c2.post("/api/import", json=faster)
+        assert r.json()["created"] == 1
+        races = {x["uuid"]: x for x in (await c2.get("/api/races")).json()}
+        assert races["b" * 32]["is_best"] and not races[doc["uuid"]]["is_best"]
+        r = await c2.post("/api/import", json={"doc_version": 1})
+        assert r.status_code == 200 and r.json()["rejected"] == 1
+        assert "uuid" in r.json()["results"][0]["error"]
+        r = await c2.post("/api/import", content=b"not json")
+        assert r.status_code == 400

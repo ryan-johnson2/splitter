@@ -63,6 +63,12 @@ says so; when it cannot tell, it asks.
 
 No game handy? `splitter fake-game --loop` serves a scripted one on port 60003.
 
+**Moving runs between installs.** Every run is one JSON document: *Export* on
+a race page, *Import…* on the Races page (or `splitter export --all -o DIR`
+and `splitter import FILE…`). Importing is idempotent, so the same file twice
+does nothing, and personal bests are re-decided on arrival. This is the first
+step towards a node that pushes runs to a web server (`docs/sync-design.md`).
+
 ## What is not in this repo
 
 The **online track picker** (search of VelociDrone's official and community

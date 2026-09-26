@@ -9,6 +9,10 @@ from splitter.db.models import Setting
 from splitter.util import utcnow
 
 DEFAULTS: dict[str, str] = {
+    # This install's identity on every run it captures (docs/sync-design.md);
+    # minted once at startup, shown on the Settings page.
+    "node_id": "",
+    "node_name": "",
     # The gaming PC. The game binds its LAN IP (never loopback), so this must
     # be that address even when Splitter runs on the same machine.
     "game_host": "",

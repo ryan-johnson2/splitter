@@ -8,7 +8,7 @@ import json
 from sqlalchemy import select
 
 from splitter.db import repos
-from splitter.db.models import EventLog, GateTime, Lap, Race, TelemetrySample
+from splitter.db.models import EventLog, GateTime, Lap, Race, TelemetryBlob
 from splitter.game.controller import RaceController
 from splitter.live.hub import LiveHub
 from splitter.util import utcnow
@@ -209,9 +209,13 @@ async def test_telemetry_is_stored_and_summarised(
     async with session_factory() as db:
         race = (await db.execute(select(Race))).scalar_one()
         assert race.max_speed == 20.0 and race.distance_m and 260 < race.distance_m < 290
-        samples = (await db.execute(select(TelemetrySample))).scalars().all()
-        # 14 s at 20 Hz storage.
+        samples = await repos.telemetry_for_race(db, race.id)
+        # 14 s at 20 Hz storage, as one blob.
         assert 260 <= len(samples) <= 290
+        blob = await db.get(TelemetryBlob, race.id)
+        assert blob is not None and blob.samples == len(samples) and blob.hz == 20.0
+        # A bare controller has no node id setting; the app mints one at startup.
+        assert race.fingerprint and race.uuid and race.node_id == ""
         lap = (await db.execute(select(Lap).where(Lap.lap == 1))).scalar_one()
         assert lap.max_speed == 20.0
     assert controller.imu_frames > 800

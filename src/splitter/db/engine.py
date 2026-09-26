@@ -51,6 +51,7 @@ async def init_db(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_add_missing_columns)
+        await conn.run_sync(_add_missing_indexes)
 
 
 def _add_missing_columns(conn: Any) -> None:
@@ -72,3 +73,16 @@ def _add_missing_columns(conn: Any) -> None:
             elif isinstance(default, int | float):
                 ddl += f" DEFAULT {default}"
             conn.execute(text(ddl))
+
+
+def _add_missing_indexes(conn: Any) -> None:
+    """``create_all`` skips tables that already exist, indexes included; an index
+    added to a model after a database was made is created here."""
+    from sqlalchemy import inspect
+
+    inspector = inspect(conn)
+    for table in Base.metadata.tables.values():
+        existing = {i["name"] for i in inspector.get_indexes(table.name)}
+        for index in table.indexes:
+            if index.name not in existing:
+                index.create(conn)
