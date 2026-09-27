@@ -501,7 +501,10 @@ async def test_a_recognised_track_switches_the_session_and_the_run(
     check = next(m for m in msgs if m["type"] == "track_check")["data"]
     assert check["verdict"] == "different" and check["confidence"] == "high"
     assert not check["unset"] and check["switched"]["track_id"] == 501
-    assert check["switched"]["mean_distance_m"] < 1 and check["switched"]["gates_compared"] == 4
+    # CLOSE_M, not 1 m: the GO-to-first-IMU-frame alignment skews gates by up to ~1 m on a
+    # slow runner (see test_two_equally_good_matches_unset_and_ask).
+    assert check["switched"]["mean_distance_m"] < trackcheck.CLOSE_M
+    assert check["switched"]["gates_compared"] == 4
     assert [c["track_id"] for c in check["candidates"]] == [501]
     # The session moved over (and sticks), the run is on Loop B, the PB race set.
     assert controller.session.track_id == 501 and controller.session.source == "matched"
