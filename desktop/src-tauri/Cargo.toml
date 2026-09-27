@@ -35,6 +35,12 @@ tauri = { version = "2", features = [] }
 tar = "0.4"
 flate2 = "1"
 
+[target.'cfg(windows)'.dependencies]
+# The shell is the Windows service host (`splitter-desktop --service`): it answers the
+# Service Control Manager in milliseconds and supervises the Python sidecar as a child.
+# The sidecar's own pywin32 service mode timed out the SCM on a real gaming PC (#13).
+windows-service = "0.7"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # PR_SET_PDEATHSIG: the kernel signals the sidecar when this shell dies, whatever
 # the cause. Belt and braces with the sidecar's own parent watchdog.

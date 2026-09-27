@@ -7,9 +7,13 @@ executable and data directory:
 
 - Linux: a systemd system unit (``/etc/systemd/system/splitter.service``).
 - macOS: a launchd daemon (``/Library/LaunchDaemons/fpv.splitter.plist``).
-- Windows: ``sc create`` for the sidecar in service mode
-  (``splitter-sidecar --service``, which needs ``pywin32``), with a DACL that
-  lets interactive users start and stop it without elevation.
+- Windows: ``sc create`` for ``<exe> --service --data-dir <dir>``, with a DACL
+  that lets interactive users start and stop it without elevation. The
+  installed app passes the desktop shell as ``--exe`` (``splitter-desktop.exe
+  --service``: a native host that answers the SCM at once and supervises the
+  sidecar — the sidecar's own pywin32 service mode timed out the SCM's 30 s
+  on a real gaming PC); the sidecar's ``--service`` stays for a Python-only
+  install.
 
 ``--dry-run`` prints what would be written and run; tests use it, and so can
 anyone who wants to review before registering. Registration itself needs

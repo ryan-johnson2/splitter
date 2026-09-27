@@ -91,6 +91,8 @@ pub fn run() {
     match args.first().map(String::as_str) {
         Some("--install-service") => std::process::exit(service_cli("install")),
         Some("--remove-service") => std::process::exit(service_cli("remove")),
+        // The Service Control Manager starts us with this (see service_cli): host the sidecar.
+        Some("--service") => std::process::exit(service_host()),
         _ => {}
     }
 
@@ -190,13 +192,154 @@ fn service_cli(action: &str) -> i32 {
     let mut cmd = Command::new(&exe);
     cmd.arg("service").arg(action);
     if action == "install" {
-        cmd.arg("--exe").arg(&exe).arg("--data-dir").arg(&data_dir);
+        // The SERVICE binary is this shell (`--service`), not the Python sidecar: a native
+        // process answers the SCM at once, then starts the sidecar however long that takes.
+        // service.py appends `--service --data-dir <dir>` to the executable it is given.
+        let host = std::env::current_exe().map_err(|e| e.to_string());
+        let Ok(host) = host else {
+            log("cannot find this executable's own path");
+            return 1;
+        };
+        cmd.arg("--exe").arg(&host).arg("--data-dir").arg(&data_dir);
     }
     let code = run_logged(&mut cmd, &format!("service {action}"));
     if action == "remove" {
         firewall_rule(&exe, false);
     }
     code
+}
+
+/// `--service`: the process the Service Control Manager runs. Registers with the SCM
+/// immediately (the 30 s start budget is spent here, on a native binary, never on Python
+/// start-up — which is what timed out on the gaming PC on 2026-09-27), then unpacks and
+/// spawns the sidecar exactly as a window would, restarts it if it dies, and stops it on
+/// Stop / Shutdown. The sidecar's output lands in the data dir's splitter-desktop.log.
+#[cfg(windows)]
+fn service_host() -> i32 {
+    service_host::run()
+}
+
+#[cfg(not(windows))]
+fn service_host() -> i32 {
+    eprintln!("splitter-desktop: --service is the Windows service host; use `splitter service install` here");
+    2
+}
+
+#[cfg(windows)]
+mod service_host {
+    use super::*;
+    use std::ffi::OsString;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use windows_service::service::{
+        ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
+        ServiceType,
+    };
+    use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
+    use windows_service::{define_windows_service, service_dispatcher};
+
+    const NAME: &str = "Splitter";
+
+    define_windows_service!(ffi_service_main, service_main);
+
+    pub fn run() -> i32 {
+        match service_dispatcher::start(NAME, ffi_service_main) {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("splitter-desktop: not started by the service control manager: {e}");
+                1
+            }
+        }
+    }
+
+    fn service_main(_args: Vec<OsString>) {
+        if let Err(e) = serve() {
+            log(format!("service host failed: {e}"));
+        }
+    }
+
+    fn status(state: ServiceState) -> ServiceStatus {
+        ServiceStatus {
+            service_type: ServiceType::OWN_PROCESS,
+            current_state: state,
+            controls_accepted: ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN,
+            exit_code: ServiceExitCode::Win32(0),
+            checkpoint: 0,
+            wait_hint: Duration::default(),
+            process_id: None,
+        }
+    }
+
+    fn sleep_unless_stopping(stopping: &AtomicBool, d: Duration) {
+        let end = Instant::now() + d;
+        while Instant::now() < end && !stopping.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+
+    fn serve() -> Result<(), Box<dyn std::error::Error>> {
+        let data_dir = service_data_dir().ok_or("no service data dir on this platform")?;
+        fs::create_dir_all(&data_dir)?;
+        open_log(&data_dir);
+        let stopping = Arc::new(AtomicBool::new(false));
+        let flag = stopping.clone();
+        let handle = service_control_handler::register(NAME, move |control| match control {
+            ServiceControl::Stop | ServiceControl::Shutdown => {
+                flag.store(true, Ordering::SeqCst);
+                ServiceControlHandlerResult::NoError
+            }
+            ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
+            _ => ServiceControlHandlerResult::NotImplemented,
+        })?;
+        // Running NOW: the SCM's clock stops here, before the sidecar's own start-up.
+        handle.set_service_status(status(ServiceState::Running))?;
+        log(format!(
+            "Splitter {} service host running — data dir {}",
+            env!("SPLITTER_BUILD"),
+            data_dir.display()
+        ));
+
+        let mut backoff = Duration::from_secs(2);
+        while !stopping.load(Ordering::SeqCst) {
+            let started = extract_sidecar(&data_dir).and_then(|exe| spawn_sidecar(&exe, &data_dir));
+            let child = match started {
+                Ok((child, url)) => {
+                    log(format!("sidecar ready at {url}"));
+                    backoff = Duration::from_secs(2);
+                    child
+                }
+                Err(e) => {
+                    log(format!("sidecar failed to start: {e} — retrying in {backoff:?}"));
+                    sleep_unless_stopping(&stopping, backoff);
+                    backoff = (backoff * 2).min(Duration::from_secs(60));
+                    continue;
+                }
+            };
+            let sidecar = Sidecar(Mutex::new(Some(child)));
+            loop {
+                if stopping.load(Ordering::SeqCst) {
+                    sidecar.kill();
+                    break;
+                }
+                let exited = match sidecar.0.lock() {
+                    Ok(mut guard) => match guard.as_mut() {
+                        Some(c) => matches!(c.try_wait(), Ok(Some(_))),
+                        None => true,
+                    },
+                    Err(_) => true,
+                };
+                if exited {
+                    log("sidecar exited on its own — restarting in 5 s");
+                    sleep_unless_stopping(&stopping, Duration::from_secs(5));
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        }
+        handle.set_service_status(status(ServiceState::Stopped))?;
+        log("service host stopped");
+        Ok(())
+    }
 }
 
 /// Run a command with no console, logging every line it prints and its exit status —
