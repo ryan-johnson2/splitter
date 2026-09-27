@@ -12,6 +12,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import logging
+import logging.handlers
 import os
 import socket
 import sys
@@ -199,18 +201,55 @@ def _run_as_windows_service(args: argparse.Namespace) -> None:
             from splitter.config import Config
 
             cfg = Config()
+            # A service has no console: sys.stdout / sys.stderr are None, and
+            # uvicorn's default logging config asks stdout whether it is a TTY
+            # ("Unable to configure formatter 'default'" — the first spike on
+            # 2026-09-27 died right there). Log to a file in the data dir
+            # instead, give the streams a real object, and keep uvicorn off
+            # its own dictConfig.
+            _service_logging(cfg.data_path)
             self.server = uvicorn.Server(
-                uvicorn.Config(create_app(cfg), host=cfg.host, port=cfg.port, log_level="info")
+                uvicorn.Config(
+                    create_app(cfg),
+                    host=cfg.host,
+                    port=cfg.port,
+                    log_level="info",
+                    log_config=None,
+                )
             )
             _write_marker(cfg.data_path, cfg.port)
             try:
                 self.server.run()
+            except Exception:  # the SCM only shows "service-specific error": log it
+                logging.getLogger("splitter.service").exception("server failed")
+                raise
             finally:
                 _remove_marker(cfg.data_path)
 
     servicemanager.Initialize()
     servicemanager.PrepareToHostSingle(SplitterService)
     servicemanager.StartServiceCtrlDispatcher()
+
+
+def _service_logging(data_dir: Path) -> None:
+    """File logging for service mode, where there is no console at all."""
+    data_dir.mkdir(parents=True, exist_ok=True)
+    log_path = data_dir / "service.log"
+    handler = logging.handlers.RotatingFileHandler(
+        log_path, maxBytes=2_000_000, backupCount=3, encoding="utf-8"
+    )
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    root = logging.getLogger()
+    root.handlers[:] = [handler]
+    root.setLevel(logging.INFO)
+    # Anything that still writes to the streams (a stray print, a library
+    # warning) must not find None there.
+    sink = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115 — lives as long as the process
+    if sys.stdout is None:
+        sys.stdout = sink
+    if sys.stderr is None:
+        sys.stderr = sink
+    logging.getLogger("splitter.service").info("service logging to %s", log_path)
 
 
 if __name__ == "__main__":
