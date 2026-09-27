@@ -319,6 +319,10 @@ mod service_host {
             loop {
                 if stopping.load(Ordering::SeqCst) {
                     sidecar.kill();
+                    // Killed, not asked to exit: the sidecar's own marker cleanup never ran.
+                    for marker in ["node.port", "node.pid"] {
+                        let _ = fs::remove_file(data_dir.join(marker));
+                    }
                     break;
                 }
                 let exited = match sidecar.0.lock() {
