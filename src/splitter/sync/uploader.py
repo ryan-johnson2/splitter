@@ -14,12 +14,14 @@ import asyncio
 import contextlib
 import ipaddress
 import logging
+import ssl
 from collections.abc import Callable
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 import httpx
+import truststore
 
 from splitter.core.rundoc import DOC_VERSION
 from splitter.db import repos
@@ -63,7 +65,15 @@ def token_allowed(url: str) -> bool:
 
 
 def _default_client(url: str) -> httpx.AsyncClient:
-    return httpx.AsyncClient(base_url=url, timeout=httpx.Timeout(30.0, connect=10.0))
+    # Verify against the machine's own trust store (Windows CryptoAPI, macOS
+    # Keychain, the OpenSSL store on Linux) rather than certifi's public bundle.
+    # A self-hosted web signed by a home CA is the normal case here, and a root
+    # the user has trusted on the machine must be enough — no CA file to point
+    # at, nothing extra in the frozen build.
+    verify = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    return httpx.AsyncClient(
+        base_url=url, timeout=httpx.Timeout(30.0, connect=10.0), verify=verify
+    )
 
 
 class Uploader:

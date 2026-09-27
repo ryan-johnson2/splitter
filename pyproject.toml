@@ -22,6 +22,10 @@ dependencies = [
     "python-multipart>=0.0.9",
     "websockets>=13.0",
     "httpx>=0.27",  # the node's uploader (sync)
+    # The uploader verifies the web's certificate against the OS trust store, not
+    # certifi's bundle: a home CA trusted on the machine must count (frozen builds
+    # otherwise refuse every self-hosted https web).
+    "truststore>=0.9",
 ]
 
 [project.optional-dependencies]

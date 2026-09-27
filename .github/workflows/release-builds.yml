@@ -298,7 +298,10 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # The GHA cache backend flakes on export ("error writing layer blob:
+          # not_found", 2026-09-27) — a warm cache is a nicety, never a reason
+          # to fail a build whose image already pushed.
+          cache-to: type=gha,mode=max,ignore-error=true
 
   release:
     name: GitHub Release

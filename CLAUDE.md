@@ -246,6 +246,9 @@ required for a run to record.
   `Uploader.enqueue`, which assigns `seq` from `node_seq`, so a zero-crossing
   abort never leaves a gap); imported runs and runs from before the upstream
   was set are queued too (`enqueue_all` on reconfigure, `repos.unqueued_runs`).
+  The client verifies TLS through the **OS trust store** (`truststore`), so a
+  home-CA certificate the machine trusts is accepted — certifi's bundle alone
+  refused every self-hosted https web from the frozen exe (2026-09-27).
   Rows are pushed oldest first with backoff 5 s → 5 min; 409 (document
   version), 410 (tombstoned) and 422 (rejected) are **terminal** (never
   retried, shown on Settings and in the header; `POST /api/sync/retry` requeues
