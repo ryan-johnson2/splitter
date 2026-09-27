@@ -227,8 +227,11 @@ Groundwork for capture nodes pushing runs to a web server
 - **Fingerprint.** `core/fingerprint.py::compute` = gates per lap + the
   drone's position at each gate of the fastest crash-free lap (lap 1 as the
   fallback), stored as JSON on `races.fingerprint` at race end so it
-  survives without the trace; `splitter backfill-fingerprints` does older
-  runs from their traces, `splitter fingerprint-stats` reports how well the
+  survives without the trace; `splitter backfill-fingerprints [--identify]` does older
+  runs from their traces **and registers their layouts** (the registry otherwise
+  learns only on attribution events, so pre-fingerprint runs never taught it —
+  the web knew 3 layouts for 7 tracks on 2026-09-27; `--identify` re-runs the
+  review queue afterwards), `splitter fingerprint-stats` reports how well the
   fingerprints in a DB separate its tracks (the threshold spike for phase 3).
 - **Document.** `core/rundoc.py::build/parse`, `DOC_VERSION` 1: uuid, node,
   seq, every `races` column except local ids and `is_best`, laps, gate
