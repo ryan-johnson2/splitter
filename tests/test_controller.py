@@ -7,6 +7,7 @@ import json
 
 from sqlalchemy import select
 
+from splitter.core import trackcheck
 from splitter.db import repos
 from splitter.db.models import EventLog, GateTime, Lap, Race, TelemetryBlob
 from splitter.game.controller import RaceController
@@ -535,7 +536,14 @@ async def test_two_equally_good_matches_unset_and_ask(
     check = next(m for m in h.drain(q) if m["type"] == "track_check")["data"]
     assert check["unset"] and check["switched"] is None
     assert sorted(c["track_id"] for c in check["candidates"]) == [501, 502]
-    assert all(c["mean_distance_m"] < 1 for c in check["candidates"])
+    # Both are the real match, well inside the "close" band. Not "< 1 m": the first IMU
+    # frame after GO is pinned to the race clock with a monotonic fallback, so a slow
+    # runner that takes 50 ms between GO and that frame shifts every gate by a metre at
+    # 20 m/s — which is what made this assertion flake on CI (2026-09-27), while the
+    # decision (unset, two candidates) was right all along.
+    distances = [c["mean_distance_m"] for c in check["candidates"]]
+    assert all(d < trackcheck.CLOSE_M for d in distances)
+    assert abs(distances[0] - distances[1]) < 0.5  # equally good: identical layouts
     assert not controller.session.identified
     async with session_factory() as db:
         race = await db.get(Race, check["race_id"])
