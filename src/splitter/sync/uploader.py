@@ -71,9 +71,7 @@ def _default_client(url: str) -> httpx.AsyncClient:
     # the user has trusted on the machine must be enough — no CA file to point
     # at, nothing extra in the frozen build.
     verify = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    return httpx.AsyncClient(
-        base_url=url, timeout=httpx.Timeout(30.0, connect=10.0), verify=verify
-    )
+    return httpx.AsyncClient(base_url=url, timeout=httpx.Timeout(30.0, connect=10.0), verify=verify)
 
 
 class Uploader:
