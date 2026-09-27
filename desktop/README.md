@@ -43,10 +43,11 @@ cd desktop/src-tauri && npx -y @tauri-apps/cli@2 build --no-bundle
 
 Linux needs the WebKitGTK toolchain (`libwebkit2gtk-4.1-dev libgtk-3-dev
 librsvg2-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libssl-dev`);
-Windows uses the bundled WebView2, macOS WKWebView. Add
-`--tracks <path-to-velocidrone-tracks> --protect` to the sidecar build to
-include the private online track client, Cython-compiled. `cargo check` without
-a sidecar: `SPLITTER_ALLOW_EMPTY_SIDECAR=1`.
+Windows uses the bundled WebView2, macOS WKWebView. The desktop build carries
+no private code: the online track picker searches through the web the app
+sends its runs to. (`--tracks <path> --protect` still exists on the sidecar
+build for a private local build, but releases do not use it.) `cargo check`
+without a sidecar: `SPLITTER_ALLOW_EMPTY_SIDECAR=1`.
 
 CI does all of this per OS in `.github/workflows/release-builds.yml` and
 attaches the binaries to the GitHub Release for a `v*` tag. On Linux the sidecar is

@@ -81,10 +81,13 @@ run was flown on another PC. Design and plan: `docs/sync-design.md`,
 The **online track picker** (search of VelociDrone's official and community
 track lists, which gives each run the track id its personal bests are keyed by)
 talks to the game's web API through a small private client package,
-`velocidrone-tracks`. It is not published here. The release binaries and images
-include it (compiled); a build from this source tree runs without it, and the
-Track dialog then takes the track id typed by hand. Everything else — timing,
-telemetry, analysis, the websocket client under `libs/velocidrone-ws` — is here.
+`velocidrone-tracks`. It is not published here. The **server** releases (the
+LXC bundle and the Docker image) include it, compiled. The **desktop app is
+built from this public source alone**: it searches through the Splitter it
+sends its runs to (Settings → *Send runs to another Splitter*), and with no
+web configured the Track dialog takes the track id typed by hand. Everything
+else — timing, telemetry, analysis, the websocket client under
+`libs/velocidrone-ws` — is here.
 
 ## Developing
 

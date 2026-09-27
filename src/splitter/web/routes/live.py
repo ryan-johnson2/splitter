@@ -8,7 +8,7 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from splitter.web.templating import templates
 
@@ -17,6 +17,9 @@ router = APIRouter()
 
 @router.get("/", response_class=HTMLResponse)
 async def live_page(request: Request) -> Any:
+    if request.app.state.settings.get_bool("web_mode"):
+        # A web records nothing: there is no live race to show. Races is home.
+        return RedirectResponse("/races", status_code=303)
     controller = request.app.state.controller
     return templates.TemplateResponse(
         request,

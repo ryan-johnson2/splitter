@@ -575,3 +575,58 @@ async def test_export_and_import_endpoints(client: AsyncClient, tmp_path: Any) -
         assert "uuid" in r.json()["results"][0]["error"]
         r = await c2.post("/api/import", content=b"not json")
         assert r.status_code == 400
+
+
+async def test_web_mode_hides_the_game_side(client: AsyncClient) -> None:
+    """#18: a web keeps runs and never talks to the game."""
+    app = client.app  # type: ignore[attr-defined]
+    # Off (the default): Live is home, the game indicator is in the header.
+    home = await client.get("/")
+    assert home.status_code == 200 and 'id="game-dot"' in home.text and 'href="/"' in home.text
+    # Give it a game address, then turn web mode on: the bridge lets go.
+    r = await client.post(
+        "/settings",
+        data={"game_host": "192.168.1.50", "game_port": "60003", "auto_connect": "1"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303 and app.state.bridge.enabled
+    r = await client.post("/settings", data={"web_mode": "1"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert app.state.settings.get_bool("web_mode") and not app.state.bridge.enabled
+    # Live redirects to Races; the nav and header drop the game side; Races stays.
+    r = await client.get("/", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/races"
+    races = (await client.get("/races")).text
+    assert 'id="game-dot"' not in races and 'id="ind-imu"' not in races
+    assert ">Live<" not in races and 'href="/races"' in races and 'href="/tracks"' in races
+    # Settings keeps the role switch and Receive; the recording cards are gone.
+    page = (await client.get("/settings")).text
+    assert 'name="web_mode"' in page and 'id="receive"' in page
+    assert 'id="game_host"' not in page and 'id="send"' not in page
+    # Off again with auto-connect: the bridge comes back on the stored address.
+    r = await client.post(
+        "/settings",
+        data={
+            "web_mode": "0",
+            "game_host": "192.168.1.50",
+            "game_port": "60003",
+            "auto_connect": "1",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303 and app.state.bridge.enabled
+
+
+async def test_settings_save_on_change_answers_json(client: AsyncClient) -> None:
+    """#17: a fetch save gets a verdict, not a redirect, and the value sticks."""
+    r = await client.post(
+        "/settings",
+        data={"player_name": "Recon", "telemetry_store_hz": "15"},
+        headers={"X-Requested-With": "fetch"},
+    )
+    assert r.status_code == 200 and r.json()["ok"] is True
+    settings = client.app.state.settings  # type: ignore[attr-defined]
+    assert settings.get("player_name") == "Recon" and settings.get_int("telemetry_store_hz") == 15
+    # The page carries the save-on-change script and the guarded cards' Apply buttons.
+    page = (await client.get("/settings")).text
+    assert 'id="settings-form"' in page and "X-Requested-With" in page and "data-apply" in page

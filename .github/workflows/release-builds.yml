@@ -16,9 +16,11 @@ name: Release builds
 #
 # Secrets:
 #   LIBRARIES_TOKEN  read access to ryan-johnson2/velocidrone-libraries. Optional:
-#                    when present the private velocidrone-tracks client is built in
-#                    (Cython-compiled), enabling the online track picker. Without it
-#                    every artifact still builds, with manual track ids only.
+#                    when present the SERVER artifacts (LXC bundle, Docker image)
+#                    get the private velocidrone-tracks client, which powers the
+#                    online track picker. The desktop apps never embed it (#19):
+#                    a node searches through its web. Without the token every
+#                    artifact still builds, with manual track ids only.
 on:
   workflow_dispatch:
     inputs:
@@ -116,18 +118,12 @@ jobs:
       # shell embeds the archive and unpacks it once per version. One-file builds
       # were dropped on purpose: self-extracting exes are what Defender flags
       # (docs/code-signing.md).
-      # The private track client. Skipped (with a notice) when the token is absent.
-      - name: Check out velocidrone-libraries (private, optional)
-        if: ${{ env.HAVE_TOKEN == 'true' }}
-        uses: actions/checkout@v4
-        with:
-          repository: ryan-johnson2/velocidrone-libraries
-          token: ${{ secrets.LIBRARIES_TOKEN }}
-          path: _libraries
-          sparse-checkout: velocidrone-tracks
-      - name: Note when the private client is unavailable
-        if: ${{ env.HAVE_TOKEN != 'true' }}
-        run: echo "::notice::LIBRARIES_TOKEN not set — building without the online track picker"
+      #
+      # The desktop app is built from PUBLIC source only (#19): the private track
+      # client is not embedded. The picker searches through the web this node sends
+      # its runs to (which carries the client — see the server job); with no web
+      # configured it takes a track id typed by hand. That is what makes the exe
+      # eligible for free open-source code signing (docs/code-signing.md).
 
       - uses: actions/setup-python@v5
         with:
@@ -142,21 +138,13 @@ jobs:
         if: startsWith(matrix.os, 'ubuntu')
         shell: bash
         run: |
-          TRACKS=""; [ -d _libraries/velocidrone-tracks ] && TRACKS="--tracks /w/_libraries/velocidrone-tracks --protect"
           docker run --rm -v "$PWD:/w" -w /w -e HOME=/tmp -e SPLITTER_BUILD python:3.12-bullseye \
-            python desktop/sidecar/build.py $TRACKS
+            python desktop/sidecar/build.py
           sudo chown -R "$(id -u):$(id -g)" desktop/sidecar
-          rm -rf _libraries
       - name: Build the sidecar (Windows / macOS)
         if: ${{ !startsWith(matrix.os, 'ubuntu') }}
         shell: bash
-        run: |
-          if [ -d _libraries/velocidrone-tracks ]; then
-            python desktop/sidecar/build.py --tracks _libraries/velocidrone-tracks --protect
-          else
-            python desktop/sidecar/build.py
-          fi
-          rm -rf _libraries
+        run: python desktop/sidecar/build.py
 
       - name: Install Tauri Linux system deps
         if: startsWith(matrix.os, 'ubuntu')

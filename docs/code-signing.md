@@ -48,7 +48,7 @@ through both.
 
 | Route | Cost | Notes |
 |---|---|---|
-| **SignPath Foundation** | free for open source | Apply with the repo; a GitHub Action submits the CI build; the signature uses their certificate with the project named in it, and reputation accrues across their projects. **Catch:** the signed artifact must be built entirely from public source in public CI. Our Windows build embeds the private `velocidrone-tracks` client, so the signable build would be the one *without* it (the picker is already optional) — or the client goes public. |
+| **SignPath Foundation** | free for open source | Apply with the repo; a GitHub Action submits the CI build; the signature uses their certificate with the project named in it, and reputation accrues across their projects. **Catch:** the signed artifact must be built entirely from public source in public CI. Since 0.9.0 the Windows build *is* that: the private `velocidrone-tracks` client stays on the server side and the desktop app searches tracks through its web (#19). So this route is open. |
 | Azure Trusted Signing | ~$10/month | Identity validation; individuals need several years of verifiable history and only some countries are open. Short-lived certificates, timestamped signatures, good SmartScreen treatment. Tauri hooks it via `bundle.windows.signCommand`. |
 | Certum open-source certificate | ~€70/year | For OSS authors; delivered on a card or cloud HSM (hardware keys are mandatory for all code-signing certificates since June 2023). |
 | Sectigo / SSL.com OV | $200–400/year | The standard commercial route. |

@@ -7,7 +7,7 @@ import socket
 from typing import Any
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from splitter.core import netinfo
 from splitter.core.timeparse import TIME_FORMATS
@@ -75,10 +75,12 @@ async def settings_save(
     upstream_url: str = Form(""),
     upstream_token: str = Form(""),
     keep_local_runs: str = Form("1"),
+    web_mode: str = Form("0"),
 ) -> Any:
     state = request.app.state
     settings = state.settings
     values = {
+        "web_mode": "1" if web_mode == "1" else "0",
         "game_host": game_host.strip(),
         "game_port": str(game_port),
         "player_name": player_name.strip(),
@@ -99,6 +101,7 @@ async def settings_save(
     host_changed = values["game_host"] != settings.get("game_host") or values[
         "game_port"
     ] != settings.get("game_port")
+    mode_changed = values["web_mode"] != settings.get("web_mode")
     sync_changed = any(
         values[k] != settings.get(k) for k in ("upstream_url", "upstream_token", "keep_local_runs")
     )
@@ -108,9 +111,19 @@ async def settings_save(
         await state.uploader.reconfigure()
         await state.controller.refresh_reference()
     state.controller.player_name = values["player_name"] or state.controller.player_name
-    if host_changed or (values["auto_connect"] == "1" and not state.bridge.enabled):
-        if values["game_host"]:
+    if values["web_mode"] == "1":
+        # A web never holds the game socket (pausing capture would keep it open,
+        # and the game feeds only its newest client — that must be the node).
+        if mode_changed or state.bridge.enabled:
+            state.bridge.disconnect()
+    elif (
+        host_changed or mode_changed or (values["auto_connect"] == "1" and not state.bridge.enabled)
+    ):
+        if values["game_host"] and (values["auto_connect"] == "1" or host_changed):
             state.bridge.configure(values["game_host"], int(values["game_port"]))
         else:
             state.bridge.disconnect()
+    if request.headers.get("x-requested-with") == "fetch":
+        # Saved as the field changed (#17): no page reload, just the verdict.
+        return JSONResponse({"ok": True, "saved": sorted(values)})
     return redirect_with_flash("/settings", notice="Settings saved.")

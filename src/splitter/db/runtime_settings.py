@@ -22,6 +22,10 @@ DEFAULTS: dict[str, str] = {
     "node_seq": "0",
     # Accept runs pushed by other installs; empty = receiving is off.
     "ingest_token": "",
+    # Web mode (#18): this Splitter keeps the runs others send and never talks to
+    # the game — the bridge is not started, Live and the recording controls are
+    # hidden, the nav is Races / Tracks / Settings. Off = the timer (default).
+    "web_mode": "0",
     # The gaming PC. The game binds its LAN IP (never loopback), so this must
     # be that address even when Splitter runs on the same machine.
     "game_host": "",

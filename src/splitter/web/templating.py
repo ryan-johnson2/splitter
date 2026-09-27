@@ -28,6 +28,8 @@ def _site_context(request: Any) -> dict[str, Any]:
         # Sync: where the runs go, and whether this install keeps its own copies.
         "upstream_url": (settings.get("upstream_url").strip() if settings else ""),
         "keep_local_runs": settings.get_bool("keep_local_runs") if settings else True,
+        # Web mode (#18): no Live page, no Game / IMU indicators, Races is home.
+        "web_mode": settings.get_bool("web_mode") if settings else False,
         # Per-request override of the global so every page honours the setting.
         "format_ms": lambda ms: format_ms(ms, style),
     }

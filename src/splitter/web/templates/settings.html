@@ -1,9 +1,16 @@
 {% extends "base.html" %}
 {% block title %}{{ brand_name }} · Settings{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Settings</h1><p class="sub">Changes apply immediately, no restart needed.</p></div>
+<div class="page-head"><h1>Settings</h1><p class="sub">Changes save as you make them. The game address and the sending address wait for <b>Apply</b>, since they reconnect things.</p></div>
 
-<form method="post" action="/settings" class="stack">
+<form method="post" action="/settings" class="stack" id="settings-form">
+<div class="card" id="role">
+  <h2>What this Splitter is</h2>
+  <div class="field"><label class="switch"><input type="hidden" name="web_mode" value="0"><input type="checkbox" name="web_mode" value="1" {% if values.web_mode == "1" %}checked{% endif %}> Web only — keeps the runs other Splitters send, never connects to the game</label>
+  <p class="help">On: the game link is not started at all, the Live page and the recording settings go away, and Races is home. Use it on the Splitter that keeps everything (the LXC or Docker one). Off: this is the timer next to the game.</p></div>
+</div>
+
+{% if values.web_mode != "1" %}
 <div class="card">
   <h2>Game PC</h2>
   <p class="help">VelociDrone listens on its <b>LAN IP</b>, port 60003 — never on localhost. Enable <i>Options → Main Settings → Websocket Communication</i> in the game (and <i>Websocket IMU</i> for telemetry).</p>
@@ -19,6 +26,7 @@
     {% if bridge.last_error %}<span class="muted">{{ bridge.last_error }}</span>{% endif %}
     {% if bridge.events_received %}· {{ bridge.events_received }} frames received{% endif %}
     {% if controller.imu_frames %}· {{ controller.imu_frames }} IMU frames{% endif %}</p>
+  <div class="inline-form"><button type="submit" class="btn sm primary" data-apply>Apply</button> <span class="muted small">reconnects to the game with the address above</span></div>
 </div>
 
 <div class="card">
@@ -55,6 +63,7 @@
     {% if sync.last_ack_at %}· last sent <time datetime="{{ sync.last_ack_at }}">{{ sync.last_ack_at }}</time>{% endif %}
   </p>
   <div class="inline-form">
+    <button type="submit" class="btn sm primary" data-apply>Apply</button>
     <button type="button" class="btn sm" id="sync-test">Test connection</button>
     <button type="button" class="btn sm" id="sync-flush" {% if not sync.upstream %}disabled{% endif %}>Send now</button>
     {% if sync.terminal %}<button type="button" class="btn sm" id="sync-retry">Retry refused runs</button>{% endif %}
@@ -63,6 +72,7 @@
   </div>
   {% endif %}
 </div>
+{% endif %}
 
 <div class="card" id="receive">
   <h2>Receive runs from other Splitters</h2>
@@ -95,13 +105,46 @@
   <p class="small muted">{{ brand_name }} v{{ app_version }}</p>
 </div>
 
-<div class="form-actions"><button type="submit" class="primary">Save settings</button></div>
+<div class="form-actions" id="save-all"><button type="submit" class="primary">Save settings</button></div>
 </form>
 <form method="post" action="/settings/ingest-token" id="ingest-form"></form>
 {% endblock %}
 
 {% block scripts %}
 <script>
+  // Save on change (#17): every field posts the whole form as it changes, except
+  // the ones that reconnect something (the game address, the sending address and
+  // token), which wait for their card's Apply. The page's Save button stays for
+  // browsers without scripting.
+  (function () {
+    var form = document.getElementById("settings-form");
+    if (!form || !window.fetch) return;
+    var GUARDED = { game_host: 1, game_port: 1, upstream_url: 1, upstream_token: 1 };
+    var saveAll = document.getElementById("save-all"); if (saveAll) saveAll.hidden = true;
+    var timer = null, inflight = null;
+    function tick(el, ok) {
+      var host = el.closest(".field") || el.parentNode, t = host.querySelector(".saved-tick");
+      if (!t) { t = document.createElement("span"); t.className = "saved-tick"; host.appendChild(t); }
+      t.textContent = ok ? "saved" : "not saved"; t.classList.toggle("bad", !ok); t.classList.remove("fade");
+      void t.offsetWidth; t.classList.add("fade");
+    }
+    function save(el) {
+      var data = new URLSearchParams(new FormData(form));
+      inflight = fetch("/settings", { method: "POST", body: data, headers: { "X-Requested-With": "fetch" } })
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)); })
+        .then(function (j) { tick(el, !!j.ok); if (el.name === "web_mode") location.reload(); })
+        .catch(function () { tick(el, false); });
+    }
+    form.addEventListener("change", function (ev) {
+      var el = ev.target; if (!el.name || GUARDED[el.name]) return;
+      clearTimeout(timer); save(el);
+    });
+    form.addEventListener("input", function (ev) {
+      var el = ev.target; if (!el.name || GUARDED[el.name]) return;
+      if (el.type === "checkbox" || el.tagName === "SELECT") return;
+      clearTimeout(timer); timer = setTimeout(function () { save(el); }, 600);
+    });
+  })();
   (function () {
     var out = document.getElementById("sync-result"), status = document.getElementById("sync-status");
     function say(t) { if (out) out.textContent = t; }

@@ -37,8 +37,16 @@ Socket.IO + manual session entry); built in Marshal's shape.
 - SQLite (aiosqlite + SQLAlchemy 2.0 async, WAL). `create_all` at startup plus
   automatic `ADD COLUMN` for additive changes (`db/engine.py::init_db`).
 - Runtime knobs live in the `settings` table (`db/runtime_settings.py`),
-  edited on the Settings page; env (`config.py`) only has `DATABASE_URL`,
-  `HOST`, `PORT`.
+  edited on the Settings page — **saved as they change** (#17: the page posts
+  the whole form with `X-Requested-With: fetch` and gets JSON back; the game
+  address and the sending address/token wait for their card's *Apply*, since
+  they reconnect things); env (`config.py`) only has `DATABASE_URL`, `HOST`,
+  `PORT`.
+- **Web mode** (`web_mode`, #18): the Splitter that keeps everyone's runs. The
+  bridge is never configured (pausing capture keeps the socket; this does not),
+  `/` redirects to `/races`, the nav is Races / Tracks / Settings, the Game /
+  IMU / Web indicators and the Game PC / Telemetry / Protocol / Send cards are
+  gone. Off by default; `templating._site_context` exposes it to every page.
 
 ## Race lifecycle (what the game sends, 1.17.13)
 
@@ -403,8 +411,11 @@ idempotent and is the upgrade path). Docker: `docker compose up -d`, data in
 ## Desktop / releases
 
 `desktop/` holds the portable native app: `sidecar/build.py` freezes the server
-with PyInstaller as a **one-dir** build (`--tracks … --protect` Cython-compiles
-the private client in) and packs it as `dist/splitter-sidecar.tar.gz`;
+with PyInstaller as a **one-dir** build and packs it as
+`dist/splitter-sidecar.tar.gz` — **from public source only** since 0.9.0 (#19:
+the private track client stays in the server artifacts; a node's picker
+proxies through its web, `api.track_search` → `Uploader.proxy_search`; the
+`--tracks … --protect` flags remain for a private local build);
 `src-tauri/` is a Tauri 2 shell that **embeds** that archive (`build.rs`),
 unpacks it once per version into `splitter-data/bin/splitter-sidecar-<version>/`
 beside the exe (older versions removed; `.unpacked` marker = archive size),

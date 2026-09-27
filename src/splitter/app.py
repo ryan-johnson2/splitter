@@ -106,7 +106,11 @@ def create_app(config: Config | None = None) -> FastAPI:
             await controller.on_game_state(b.connected)
 
         bridge = GameBridge(on_event=controller.handle_event, on_state=on_state)
-        if settings.get_bool("auto_connect") and settings.get("game_host"):
+        if (
+            settings.get_bool("auto_connect")
+            and settings.get("game_host")
+            and not settings.get_bool("web_mode")
+        ):
             bridge.configure(settings.get("game_host"), settings.get_int("game_port"))
 
         app.state.config = cfg

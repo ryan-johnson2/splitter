@@ -415,7 +415,7 @@ What is left needs a Windows machine with the game. In order:
    the PC (or pick nothing) and fly the same track: the LXC should attribute
    it (`matched`). Fly a new track: it should land under *no track yet*,
    label it once on `/races/layouts`, fly it again, check it is recognised.
-3. **Threshold check** on the LXC's real data: `splitter fingerprint-stats`
+3. ~~DONE 2026-09-27 on the LXC (62 fingerprinted runs, 5 tracks): same-track median 0.9 m, p95 1.2 m, max 1.6 m against 12 m; no comparable cross-track pairs yet (different gate counts).~~ **Threshold check** on the LXC's real data: `splitter fingerprint-stats`
    (after `splitter backfill-fingerprints`). Same-track pairs should sit well
    under 12 m and cross-track pairs well over; if not, adjust
    `trackcheck.DIFFERENT_M` / `CLOSE_M` before trusting identification.

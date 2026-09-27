@@ -77,6 +77,11 @@ tr.best td { background:color-mix(in srgb, var(--accent) 7%, transparent); }
 .pill.warn { color:var(--warn); border-color:color-mix(in srgb, var(--warn) 50%, transparent); background:color-mix(in srgb, var(--warn) 10%, transparent); }
 .pill.bad { color:var(--bad); border-color:color-mix(in srgb, var(--bad) 50%, transparent); background:color-mix(in srgb, var(--bad) 10%, transparent); }
 .pill.dim { color:var(--dim); }
+/* Settings save-on-change verdict (#17): shows, then fades. */
+.saved-tick { color:var(--ok); font-size:.78rem; margin-left:.4rem; opacity:1; }
+.saved-tick.bad { color:var(--bad); }
+.saved-tick.fade { transition: opacity 1.2s ease 1.5s; opacity:0; }
+.saved-tick.fade.bad { opacity:1; }
 .pill.accent { color:var(--accent); border-color:color-mix(in srgb, var(--accent) 50%, transparent); background:color-mix(in srgb, var(--accent) 10%, transparent); }
 
 /* ── forms ── */
