@@ -6,7 +6,7 @@ import json
 import uuid as uuidlib
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import delete, func, select, update
@@ -183,6 +183,7 @@ async def update_race(session: AsyncSession, race_id: int, **fields: Any) -> Rac
         await session.commit()
         await learn_fingerprint(session, race)
         await derive_delta(session, race)
+        await infer_bookended(session, race)
     await session.commit()
     new_key = race_key(race)
     await recalculate_best(session, old_key)
@@ -1012,12 +1013,105 @@ async def identify_race(session: AsyncSession, race: Race) -> identification.Dec
         await session.commit()
         await derive_delta(session, race)
         await recalculate_best(session, race_key(race))
+        await infer_bookended(session, race)
     return decision
 
 
+# Runs with no track between two runs on the same track, from the same node,
+# are that track too (aborted before the first lap — no fingerprint — or a
+# layout the registry does not know yet). Each gap in the chain must be
+# shorter than this: one sitting, not the next day's flying.
+BOOKEND_GAP = timedelta(hours=3)
+
+
+async def infer_bookended(session: AsyncSession, race: Race) -> list[Race]:
+    """``race`` has a track. Walk back over the runs just before it on the same
+    node: a block with no track, preceded by a run on the same track, is that
+    track (``session_source = "bookend"``). A run in the block whose own
+    fingerprint says it is a different layout than the track's known one is
+    left alone. Returns the runs attributed."""
+    if race.track_id <= 0 or not race.node_id or race.started_at is None:
+        return []
+    stmt = (
+        select(Race)
+        .where(
+            (Race.node_id == race.node_id)
+            & (Race.id != race.id)
+            & (Race.started_at <= race.started_at)
+            & (Race.status != "running")
+        )
+        .order_by(Race.started_at.desc(), Race.id.desc())
+        .limit(50)
+    )
+    before = list((await session.execute(stmt)).scalars().all())
+    block: list[Race] = []
+    later = race
+    opener: Race | None = None
+    for prev in before:
+        if later.started_at - prev.started_at > BOOKEND_GAP:
+            break
+        if prev.track_id == race.track_id:
+            opener = prev
+            break
+        if prev.track_id > 0 or prev.track_note == "not a track":
+            break
+        block.append(prev)
+        later = prev
+    if opener is None or not block:
+        return []
+    known: dict[int, identification.Known] = {}
+    done: list[Race] = []
+    for r in block:
+        fp = fingerprint_of(r)
+        if fp is not None:
+            if fp.gates_per_lap not in known:
+                reg = await registry_for(session, fp.gates_per_lap)
+                if race.track_id in reg:
+                    known[fp.gates_per_lap] = reg[race.track_id]
+            layout = known.get(fp.gates_per_lap)
+            if (
+                layout is not None
+                and identification.identify(fp, {race.track_id: layout}).track is None
+            ):
+                continue  # its own gates say another layout: not this track
+        r.track_id = race.track_id
+        r.scene_id = race.scene_id
+        r.track_name = race.track_name
+        r.scenery = race.scenery
+        r.track_source = race.track_source
+        r.session_source = "bookend"
+        r.track_note = ""
+        done.append(r)
+    if done:
+        await session.commit()
+        for r in done:
+            await derive_delta(session, r)
+        for key in {race_key(r) for r in done}:
+            await recalculate_best(session, key)
+    return done
+
+
+async def infer_bookended_all(session: AsyncSession) -> int:
+    """The bookend rule over the whole table (every attributed run looks back);
+    returns how many runs got a track."""
+    rows = (
+        (
+            await session.execute(
+                select(Race).where(Race.track_id > 0).order_by(Race.started_at, Race.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    n = 0
+    for race in rows:
+        n += len(await infer_bookended(session, race))
+    return n
+
+
 async def identify_unidentified(session: AsyncSession) -> int:
-    """Re-run identification over every run with no track id; returns how many
-    were attributed."""
+    """Re-run identification over every run with no track id, then the bookend
+    rule; returns how many were attributed."""
     rows = (
         (
             await session.execute(
@@ -1033,7 +1127,7 @@ async def identify_unidentified(session: AsyncSession) -> int:
     for race in rows:
         if (await identify_race(session, race)).track is not None:
             n += 1
-    return n
+    return n + await infer_bookended_all(session)
 
 
 async def derive_delta(session: AsyncSession, race: Race) -> None:

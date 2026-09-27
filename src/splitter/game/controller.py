@@ -973,6 +973,7 @@ class RaceController:
             await db.commit()
             if race.track_id > 0:
                 await repos.learn_fingerprint(db, race)
+                await repos.infer_bookended(db, race)
             self._geometry_cache.pop(race.track_id, None)
             is_best = False
             if not aborted:

@@ -345,6 +345,26 @@ required for a run to record.
   the service's data dir migration from a portable install, the OS
   notification for missing IMU.
 
+## The bookend rule (0.10.0)
+
+Ryan's ask (2026-09-27): "I run a race, then have 3 unfinished, then run a
+race, all on the same track — the app may not know the track at all, but we
+should set those 3 to the track that bookends them."
+`repos.infer_bookended(db, race)`: given a run **with** a track, walk back over
+the runs just before it **on the same node** (`started_at` order, each gap
+under `BOOKEND_GAP` = 3 h, one sitting); a block with `track_id == 0`
+preceded by a run on the **same** track gets that track, `session_source =
+"bookend"` (the Races page shows *between*). A run in the block whose own
+fingerprint says a different layout than the track's known one is skipped;
+a run with no fingerprint (aborted before lap 1) is exactly the case. Runs
+labelled *not a track*, another track, another node, or a longer gap end the
+walk. Not learned into the registry (weaker evidence). Runs when a track
+arrives from anywhere: ingest with a picked track, `identify_race` on a
+match, `update_race` with a track (edit, bulk edit, apply-to-run), and the
+node's own race end. `infer_bookended_all` is the sweep, run by
+`identify_unidentified` (the queue's *Re-run identification*,
+`backfill-fingerprints --identify`).
+
 ## Label by layout (sync phase 4)
 
 - `web/clusters.py` (pure): unidentified runs with a fingerprint, in order of

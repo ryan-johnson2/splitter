@@ -38,7 +38,7 @@
       <td data-label="Time" class="num">{% if r.status == "finished" %}{{ format_ms(r.total_time_ms) }}{% else %}<span class="pill bad">aborted</span>{% endif %}</td>
       <td data-label="vs PB" class="num {{ delta_class(r.pb_delta_ms) }}" {% if r.delta_source == "derived" %}title="against the PB as of when the run arrived here, not at GO"{% endif %}>{{ format_delta(r.pb_delta_ms) if r.status == "finished" else "" }}{% if r.delta_source == "derived" and r.pb_delta_ms is not none %}<span class="muted small">*</span>{% endif %}</td>
       <td data-label="Top km/h" class="num">{{ format_speed(r.max_speed) }}</td>
-      <td>{% if r.is_best %}<span class="pill accent">PB</span>{% endif %}{% if r.session_source == "manual" %}<span class="pill dim" title="track entered by hand">manual</span>{% elif r.session_source == "sticky" %}<span class="pill dim" title="track carried over from the previous run">carried</span>{% elif r.session_source == "matched" %}<span class="pill dim" title="track recognised from this run's gate positions">matched</span>{% endif %}</td>
+      <td>{% if r.is_best %}<span class="pill accent">PB</span>{% endif %}{% if r.session_source == "manual" %}<span class="pill dim" title="track entered by hand">manual</span>{% elif r.session_source == "sticky" %}<span class="pill dim" title="track carried over from the previous run">carried</span>{% elif r.session_source == "matched" %}<span class="pill dim" title="track recognised from this run's gate positions">matched</span>{% elif r.session_source == "bookend" %}<span class="pill dim" title="no track of its own: the runs before and after it on this Splitter were on this track">between</span>{% endif %}</td>
     </tr>
 {% endmacro %}
 {% macro race_table(rows) %}

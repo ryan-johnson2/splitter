@@ -90,6 +90,7 @@ async def ingest_run(request: Request, uuid: str) -> JSONResponse:
             assert race is not None
             if race.track_id > 0:
                 await repos.learn_fingerprint(db, race)  # the node picked it: remember the layout
+                await repos.infer_bookended(db, race)  # ...and the trackless runs just before it
             else:
                 identified = await repos.identify_race(db, race)
             await repos.derive_delta(db, race)
