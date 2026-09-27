@@ -195,7 +195,7 @@ mod tray {
     use super::show_window;
     use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-    use tauri::{App, Manager};
+    use tauri::App;
 
     pub fn install(app: &App) -> tauri::Result<()> {
         let open = MenuItem::with_id(app, "open", "Open Splitter", true, None::<&str>)?;
