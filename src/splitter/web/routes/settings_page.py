@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+import socket
 from typing import Any
 
 from fastapi import APIRouter, Form, Request
@@ -23,6 +24,8 @@ async def settings_page(request: Request) -> Any:
         "settings.html",
         {
             "values": state.settings.all(),
+            # The node name's placeholder: what the uploader sends when it is blank.
+            "hostname": socket.gethostname(),
             "local_addresses": netinfo.local_ipv4_addresses() if state.config.desktop else [],
             "time_formats": TIME_FORMATS,
             "bridge": state.bridge.status(),

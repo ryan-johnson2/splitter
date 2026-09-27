@@ -406,7 +406,7 @@ What is left needs a Windows machine with the game. In order:
 1. **Build the branch** (`feature/cloud-sync`): `python desktop/sidecar/build.py`,
    then `npx -y @tauri-apps/cli@2 build --no-bundle` in `desktop/src-tauri`,
    or push a `dev-*` tag and take the CI artifacts.
-2. **Node against the LXC.** On the LXC (upgrade it with the bundle from the
+2. ~~DONE 2026-09-27 (dev-2026-09-27c against the LXC on 0.8.0-dev): push, match, label, recognise all passed.~~ **Node against the LXC.** On the LXC (upgrade it with the bundle from the
    same build): Settings → *Receive runs* → turn on, copy the token. On the
    PC's portable build: Settings → *Send runs to another Splitter* → the LXC
    address and token → *Test connection*. Fly a run: it should appear on the
