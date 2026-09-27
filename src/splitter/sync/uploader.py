@@ -140,7 +140,9 @@ class Uploader:
             self.last_error = "HTTP 403: the web is not receiving runs (turn it on in its Settings)"
         elif status == 401:
             self.web = "bad_token"
-            self.last_error = "HTTP 401: the web refused the token (copy it again from its Settings)"
+            self.last_error = (
+                "HTTP 401: the web refused the token (copy it again from its Settings)"
+            )
         else:
             self.web = "unreachable"
             self.last_error = error
