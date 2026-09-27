@@ -90,9 +90,12 @@ async def ingest_run(request: Request, uuid: str) -> JSONResponse:
             assert race is not None
             if race.track_id > 0:
                 await repos.learn_fingerprint(db, race)  # the node picked it: remember the layout
-                await repos.infer_bookended(db, race)  # ...and the trackless runs just before it
             else:
                 identified = await repos.identify_race(db, race)
+                if race.track_id == 0:
+                    # Not recognised: carry the node's previous track unless the
+                    # run's own gates say it moved (the sticky rule).
+                    await repos.infer_sticky(db, race)
             await repos.derive_delta(db, race)
             await repos.recalculate_best(db, repos.race_key(race))
             result = repos.ImportResult(race.uuid, "created", race.id, key=repos.race_key(race))

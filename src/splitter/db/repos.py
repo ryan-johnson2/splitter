@@ -183,7 +183,6 @@ async def update_race(session: AsyncSession, race_id: int, **fields: Any) -> Rac
         await session.commit()
         await learn_fingerprint(session, race)
         await derive_delta(session, race)
-        await infer_bookended(session, race)
     await session.commit()
     new_key = race_key(race)
     await recalculate_best(session, old_key)
@@ -1013,24 +1012,78 @@ async def identify_race(session: AsyncSession, race: Race) -> identification.Dec
         await session.commit()
         await derive_delta(session, race)
         await recalculate_best(session, race_key(race))
-        await infer_bookended(session, race)
     return decision
 
 
-# Runs with no track between two runs on the same track, from the same node,
-# are that track too (aborted before the first lap — no fingerprint — or a
-# layout the registry does not know yet). Each gap in the chain must be
-# shorter than this: one sitting, not the next day's flying.
-BOOKEND_GAP = timedelta(hours=3)
+# A run with no track carries the previous run's track on that node forward —
+# unless its own gate positions say it moved (the sticky rule, Ryan 2026-09-27:
+# "sticky select the same track unless we know for sure we moved"). The same
+# idea as the node's sticky session, applied where the node could not: runs it
+# aborted before lap 1 (no fingerprint), or layouts the registry does not know.
+# Each gap in the chain must be shorter than this: one sitting, not the next day.
+STICKY_GAP = timedelta(hours=3)
 
 
-async def infer_bookended(session: AsyncSession, race: Race) -> list[Race]:
-    """``race`` has a track. Walk back over the runs just before it on the same
-    node: a block with no track, preceded by a run on the same track, is that
-    track (``session_source = "bookend"``). A run in the block whose own
-    fingerprint says it is a different layout than the track's known one is
-    left alone. Returns the runs attributed."""
-    if race.track_id <= 0 or not race.node_id or race.started_at is None:
+async def _contradicts(
+    session: AsyncSession,
+    race: Race,
+    track_id: int,
+    cache: dict[tuple[int, int], identification.Known | None],
+) -> bool:
+    """Whether the run's own fingerprint rules the track out: the track's layout
+    is known (registry) and this run's gates do not match it, or the track is
+    known only with another gate count. No fingerprint → cannot say → False."""
+    fp = fingerprint_of(race)
+    if fp is None:
+        return False
+    key = (track_id, fp.gates_per_lap)
+    if key not in cache:
+        reg = await registry_for(session, fp.gates_per_lap)
+        known = reg.get(track_id)
+        if known is None:
+            counts = (
+                await session.execute(
+                    select(TrackFingerprint.gates_per_lap).where(
+                        TrackFingerprint.track_id == track_id
+                    )
+                )
+            ).scalars()
+            if any(c != fp.gates_per_lap for c in counts):
+                cache[key] = None  # known, but never with this many gates
+                return True
+        cache[key] = known
+    known = cache[key]
+    if known is None:
+        return False
+    return identification.identify(fp, {track_id: known}).track is None
+
+
+def _carry(race: Race, source: Race) -> None:
+    race.track_id = source.track_id
+    race.scene_id = source.scene_id
+    race.track_name = source.track_name
+    race.scenery = source.scenery
+    race.track_source = source.track_source
+    race.session_source = "sticky"
+    race.track_note = ""
+
+
+async def _settle(session: AsyncSession, done: list[Race]) -> None:
+    if not done:
+        return
+    await session.commit()
+    for r in done:
+        await derive_delta(session, r)
+    for key in {race_key(r) for r in done}:
+        await recalculate_best(session, key)
+
+
+async def infer_sticky(session: AsyncSession, race: Race) -> list[Race]:
+    """``race`` has no track. Walk back over the runs just before it on the
+    same node (each gap under ``STICKY_GAP``) to the last run with a track;
+    if no run in between, nor this one, contradicts that track, they all
+    carry it (``session_source = "sticky"``). Returns the runs attributed."""
+    if race.track_id != 0 or not race.node_id or race.track_note == "not a track":
         return []
     stmt = (
         select(Race)
@@ -1044,73 +1097,74 @@ async def infer_bookended(session: AsyncSession, race: Race) -> list[Race]:
         .limit(50)
     )
     before = list((await session.execute(stmt)).scalars().all())
-    block: list[Race] = []
+    between: list[Race] = []
     later = race
     opener: Race | None = None
     for prev in before:
-        if later.started_at - prev.started_at > BOOKEND_GAP:
+        if later.started_at - prev.started_at > STICKY_GAP:
             break
-        if prev.track_id == race.track_id:
+        if prev.track_id > 0:
             opener = prev
             break
-        if prev.track_id > 0 or prev.track_note == "not a track":
+        if prev.track_note == "not a track":
             break
-        block.append(prev)
+        between.append(prev)
         later = prev
-    if opener is None or not block:
+    if opener is None:
         return []
-    known: dict[int, identification.Known] = {}
+    cache: dict[tuple[int, int], identification.Known | None] = {}
     done: list[Race] = []
-    for r in block:
-        fp = fingerprint_of(r)
-        if fp is not None:
-            if fp.gates_per_lap not in known:
-                reg = await registry_for(session, fp.gates_per_lap)
-                if race.track_id in reg:
-                    known[fp.gates_per_lap] = reg[race.track_id]
-            layout = known.get(fp.gates_per_lap)
-            if (
-                layout is not None
-                and identification.identify(fp, {race.track_id: layout}).track is None
-            ):
-                continue  # its own gates say another layout: not this track
-        r.track_id = race.track_id
-        r.scene_id = race.scene_id
-        r.track_name = race.track_name
-        r.scenery = race.scenery
-        r.track_source = race.track_source
-        r.session_source = "bookend"
-        r.track_note = ""
-        done.append(r)
-    if done:
-        await session.commit()
-        for r in done:
-            await derive_delta(session, r)
-        for key in {race_key(r) for r in done}:
-            await recalculate_best(session, key)
+    for r in [*reversed(between), race]:  # oldest first: the first break ends the chain
+        if await _contradicts(session, r, opener.track_id, cache):
+            break
+        if r.track_id == 0:
+            _carry(r, opener)
+            done.append(r)
+    await _settle(session, done)
     return done
 
 
-async def infer_bookended_all(session: AsyncSession) -> int:
-    """The bookend rule over the whole table (every attributed run looks back);
+async def infer_sticky_all(session: AsyncSession) -> int:
+    """The sticky rule over the whole table, node by node in time order;
     returns how many runs got a track."""
     rows = (
         (
             await session.execute(
-                select(Race).where(Race.track_id > 0).order_by(Race.started_at, Race.id)
+                select(Race)
+                .where(Race.status != "running")
+                .order_by(Race.node_id, Race.started_at, Race.id)
             )
         )
         .scalars()
         .all()
     )
-    n = 0
-    for race in rows:
-        n += len(await infer_bookended(session, race))
-    return n
+    cache: dict[tuple[int, int], identification.Known | None] = {}
+    done: list[Race] = []
+    current: Race | None = None
+    last: Race | None = None
+    for r in rows:
+        if last is None or last.node_id != r.node_id or r.started_at - last.started_at > STICKY_GAP:
+            current = None
+        last = r
+        if r.track_id > 0:
+            current = r
+            continue
+        if r.track_id < 0 or r.track_note == "not a track":
+            current = None
+            continue
+        if current is None:
+            continue
+        if await _contradicts(session, r, current.track_id, cache):
+            current = None
+            continue
+        _carry(r, current)
+        done.append(r)
+    await _settle(session, done)
+    return len(done)
 
 
 async def identify_unidentified(session: AsyncSession) -> int:
-    """Re-run identification over every run with no track id, then the bookend
+    """Re-run identification over every run with no track id, then the sticky
     rule; returns how many were attributed."""
     rows = (
         (
@@ -1127,7 +1181,7 @@ async def identify_unidentified(session: AsyncSession) -> int:
     for race in rows:
         if (await identify_race(session, race)).track is not None:
             n += 1
-    return n + await infer_bookended_all(session)
+    return n + await infer_sticky_all(session)
 
 
 async def derive_delta(session: AsyncSession, race: Race) -> None:

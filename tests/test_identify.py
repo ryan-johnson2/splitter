@@ -175,12 +175,14 @@ async def test_twins_are_attributed_to_the_newest_and_flagged(web: Side, node: S
     got = (await web.client.get("/api/races")).json()[0]
     assert got["track_id"] == 501 and got["track_name"] == "Sticky Track"
     assert "ambiguous" in (await web.client.get("/races")).text
-    # No fingerprint (no IMU): stays unidentified, and the queue says why.
+    # No fingerprint (no IMU): nothing to match, so the sticky rule carries the
+    # node's previous track (the twin it was just given) and the queue stays empty.
     await fly(ctl, imu=False)
     await up.process_once()
     got = (await web.client.get("/api/races")).json()[0]
-    assert got["track_id"] == 0
-    assert "no IMU" in (await web.client.get("/races?unidentified=1")).text
+    assert got["track_id"] == 501 and got["session_source"] == "sticky"
+    queue = (await web.client.get("/races?unidentified=1")).text
+    assert f'href="/races/{got["id"]}"' not in queue
 
 
 def test_known_positions_from_fingerprint() -> None:

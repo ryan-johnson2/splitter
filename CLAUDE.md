@@ -345,25 +345,29 @@ required for a run to record.
   the service's data dir migration from a portable install, the OS
   notification for missing IMU.
 
-## The bookend rule (0.10.0)
+## The sticky rule on the web (0.10.0)
 
-Ryan's ask (2026-09-27): "I run a race, then have 3 unfinished, then run a
-race, all on the same track — the app may not know the track at all, but we
-should set those 3 to the track that bookends them."
-`repos.infer_bookended(db, race)`: given a run **with** a track, walk back over
-the runs just before it **on the same node** (`started_at` order, each gap
-under `BOOKEND_GAP` = 3 h, one sitting); a block with `track_id == 0`
-preceded by a run on the **same** track gets that track, `session_source =
-"bookend"` (the Races page shows *between*). A run in the block whose own
-fingerprint says a different layout than the track's known one is skipped;
-a run with no fingerprint (aborted before lap 1) is exactly the case. Runs
-labelled *not a track*, another track, another node, or a longer gap end the
-walk. Not learned into the registry (weaker evidence). Runs when a track
-arrives from anywhere: ingest with a picked track, `identify_race` on a
-match, `update_race` with a track (edit, bulk edit, apply-to-run), and the
-node's own race end. `infer_bookended_all` is the sweep, run by
-`identify_unidentified` (the queue's *Re-run identification*,
-`backfill-fingerprints --identify`).
+Ryan (2026-09-27): first "a race, three unfinished, a race, all on one track
+— set those three to the track that bookends them", then the better rule:
+"sticky select the same track unless we know for sure we moved". So a run
+with no track **carries the node's previous track forward** — the node's own
+sticky session, applied where the node could not (runs aborted before lap 1
+have no fingerprint; layouts the registry does not know are not matched).
+`repos.infer_sticky(db, race)` walks back over the runs just before it on the
+same node (`started_at` order, each gap under `STICKY_GAP` = 3 h, one
+sitting) to the last run with a track; if no run in between, nor this one,
+`_contradicts` that track, they all get it, `session_source = "sticky"`
+(the Races page shows *carried*, like the node's own). A run contradicts
+when its fingerprint does not match the track's known layout in the
+registry, or the track is known only with another gate count; no
+fingerprint → cannot say → carries. A contradicting run, a *not a track*
+label, another node or a longer gap ends the chain, and everything after it
+stays unknown until the next run with a track. Not learned into the registry
+(weaker evidence). Runs at ingest when identification found nothing, and as
+`infer_sticky_all` (node by node in time order) from `identify_unidentified`
+(the queue's *Re-run identification*, `backfill-fingerprints --identify`).
+The node itself is not touched: its live session already carries the track,
+and when a track check unsets it the run contradicted it anyway.
 
 ## Label by layout (sync phase 4)
 
