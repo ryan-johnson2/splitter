@@ -63,7 +63,10 @@ racedata …       → one crossing per new (lap, gate). The lap counter increme
                    game's own lap times (core/timing.py docstring).
 racestatus:"race finished" / "abort"
 ```
-
+  **A web-only Splitter always receives** (0.10.0): turning the mode on mints an
+  ingest token if there is none, `POST /settings/ingest-token action=disable` is
+  refused in it, the *Turn receiving off* button and the install-name field are
+  hidden, and `/api/ingest/ping` answers with `brand_name` instead of a node name.
 - If the single-player countdown is off there are no countdown frames: the
   first racedata after arming starts the race.
 - **A run cannot outlive the game link.** Closing the game mid-run sends no
@@ -382,7 +385,8 @@ label, another node or a longer gap ends the chain, and everything after it
 stays unknown until the next run with a track. Not learned into the registry
 (weaker evidence). Runs at ingest when identification found nothing, and as
 `infer_sticky_all` (node by node in time order) from `identify_unidentified`
-(the queue's *Re-run identification*, `backfill-fingerprints --identify`).
+(the queue's *Re-run identification*, `backfill-fingerprints --identify`). The same action is the **Find their tracks** button on the Races page's
+"runs with no track yet" line and on the Tracks page's no-track card (0.10.0).
 The node itself is not touched: its live session already carries the track,
 and when a track check unsets it the run contradicted it anyway.
 
@@ -512,7 +516,12 @@ proxies through its web, `api.track_search` → `Uploader.proxy_search`; the
 unpacks it once per version into `splitter-data/bin/splitter-sidecar-<version>/`
 beside the exe (older versions removed; `.unpacked` marker = archive size),
 spawns it and opens a window at its `SPLITTER_READY` URL
-(`splitter/desktop_entry.py`). One-dir, never one-file: self-extracting exes are
+(`splitter/desktop_entry.py`). **Windows tray (0.10.0):** `lib.rs::tray` puts an icon in the
+notification area (left-click opens the window; menu Open / Live / Races /
+Settings / Quit) and closing the window only hides it — the timer lives in the
+service, or in the shell's own sidecar, which Quit ends. `tray-icon` is a
+feature on the Windows-only `tauri` entry in `Cargo.toml`; other platforms keep
+close-is-quit. One-dir, never one-file: self-extracting exes are
 the classic Defender false positive; the binaries are unsigned and the signing
 options are in `docs/code-signing.md`. Config reads
 `SPLITTER_DATA_DIR` for the SQLite location. `.github/workflows/release-builds.yml`
