@@ -22,6 +22,8 @@ from splitter.game.bridge import GameBridge
 from splitter.game.catalog import TrackCatalog
 from splitter.game.controller import RaceController
 from splitter.live.hub import LiveHub
+from splitter.live.relay import RelayRegistry
+from splitter.sync.relay import Relay
 from splitter.sync.uploader import Uploader
 from splitter.version import __version__
 
@@ -98,6 +100,16 @@ def create_app(config: Config | None = None) -> FastAPI:
         )
         uploader.controller = controller
         controller.sync = uploader
+        # Mirror the live feed to the web (#14), when switched on; tests inject the transport.
+        relay = Relay(
+            settings,
+            session_factory,
+            hub,
+            uploader,
+            connect_factory=getattr(app.state, "relay_connect", None),
+        )
+        relay.controller = controller
+        controller.relay = relay
         controller.load_sticky_session()
         await uploader.refresh_counts()
         await controller.refresh_reference()
@@ -106,6 +118,7 @@ def create_app(config: Config | None = None) -> FastAPI:
             await controller.on_game_state(b.connected)
 
         bridge = GameBridge(on_event=controller.handle_event, on_state=on_state)
+        relay.bridge = bridge
         if (
             settings.get_bool("auto_connect")
             and settings.get("game_host")
@@ -120,10 +133,14 @@ def create_app(config: Config | None = None) -> FastAPI:
         app.state.bridge = bridge
         app.state.controller = controller
         app.state.uploader = uploader
+        app.state.relay = relay
+        # The nodes relaying their live feed here (the web side of #14).
+        app.state.relays = RelayRegistry(hub)
 
         tasks = [asyncio.create_task(_supervise("game-bridge", bridge.run), name="game-bridge")]
         if getattr(app.state, "sync_autorun", True):  # tests drive the uploader by hand
             tasks.append(asyncio.create_task(_supervise("uploader", uploader.run), name="uploader"))
+            tasks.append(asyncio.create_task(_supervise("relay", relay.run), name="relay"))
         try:
             yield
         finally:
@@ -142,11 +159,23 @@ def create_app(config: Config | None = None) -> FastAPI:
         name="static",
     )
 
-    from splitter.web.routes import api, history, ingest, live, protocol, settings_page, tracks
+    from splitter.web.routes import (
+        api,
+        history,
+        ingest,
+        live,
+        protocol,
+        settings_page,
+        tracks,
+    )
+    from splitter.web.routes import (
+        relay as relay_routes,
+    )
 
     app.include_router(live.router)
     app.include_router(api.router)
     app.include_router(ingest.router)
+    app.include_router(relay_routes.router)
     app.include_router(history.router)
     app.include_router(tracks.router)
     app.include_router(settings_page.router)
@@ -174,6 +203,8 @@ def create_app(config: Config | None = None) -> FastAPI:
             "game": bridge.status(),
             "race_active": controller.race_active,
             "clients": app.state.hub.clients,
+            "relay": app.state.relay.state,
+            "relaying": len(app.state.relays),
         }
 
     return app

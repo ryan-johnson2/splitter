@@ -23,7 +23,7 @@
 {% endif %}
 {% if nodes %}
 <p class="small muted" id="nodes">Receiving from
-  {% for n in nodes %}<b>{{ n.node.name or n.node.node_id[:8] }}</b> ({{ n.runs }} run{{ "s" if n.runs != 1 }}{% if n.pending %}, <span class="pill warn" title="runs the node numbered that never arrived: still queued there, or deleted here">{{ n.pending }} pending</span>{% endif %}, last <time datetime="{{ utc_iso(n.node.last_seen_at) }}">{{ n.node.last_seen_at }}</time>){% if not loop.last %}, {% endif %}{% endfor %}.
+  {% for n in nodes %}<b>{{ n.node.name or n.node.node_id[:8] }}</b>{% if n.node.node_id in (live_nodes | map(attribute="node_id") | list) %} <a class="pill ok small" href="/live/{{ n.node.node_id }}" title="its live view, relayed here">live</a>{% endif %} ({{ n.runs }} run{{ "s" if n.runs != 1 }}{% if n.pending %}, <span class="pill warn" title="runs the node numbered that never arrived: still queued there, or deleted here">{{ n.pending }} pending</span>{% endif %}, last <time datetime="{{ utc_iso(n.node.last_seen_at) }}">{{ n.node.last_seen_at }}</time>){% if not loop.last %}, {% endif %}{% endfor %}.
 </p>
 {% endif %}
 

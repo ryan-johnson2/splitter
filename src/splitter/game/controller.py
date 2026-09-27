@@ -61,6 +61,7 @@ from splitter.sync import bundle as bundles
 from splitter.util import utcnow
 
 if TYPE_CHECKING:
+    from splitter.sync.relay import Relay
     from splitter.sync.uploader import Uploader
 
 log = logging.getLogger(__name__)
@@ -133,6 +134,7 @@ class RaceController:
         self._bundle_geometry: dict[int, tuple[int | None, dict[int, GatePosition]]] = {}
         # Set by the app when sync is wired up; queues kept runs for upload.
         self.sync: Uploader | None = None
+        self.relay: Relay | None = None
         self.last_track_check: dict[str, Any] | None = None
         self.race_id: int | None = None
         self.race_started_at: datetime | None = None
@@ -210,6 +212,7 @@ class RaceController:
             "capture": self.capture,
             "track_check": self.last_track_check,
             "sync": self.sync.status() if self.sync else None,
+            "relay": self.relay.status() if self.relay else None,
         }
 
     async def set_manual_session(

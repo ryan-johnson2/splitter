@@ -20,6 +20,9 @@ DEFAULTS: dict[str, str] = {
     "upstream_token": "",
     "keep_local_runs": "1",
     "node_seq": "0",
+    # Relay (#14): also mirror the live feed to that web so its Live page shows
+    # this timer and can pick the track. Opt-in; never needed to record.
+    "relay_enabled": "0",
     # Accept runs pushed by other installs; empty = receiving is off.
     "ingest_token": "",
     # Web mode (#18): this Splitter keeps the runs others send and never talks to

@@ -10,7 +10,9 @@ from pydantic import BaseModel
 
 from splitter.core import quads
 from splitter.db import repos
-from splitter.game.catalog import SOURCES, SearchResult
+from splitter.game.catalog import SearchResult
+from splitter.sync import commands
+from splitter.sync.commands import AbortIn, CaptureIn, SessionIn
 from splitter.version import __version__
 
 MAX_IMPORT_DOCS = 500
@@ -23,73 +25,19 @@ async def state(request: Request) -> dict[str, Any]:
     return dict(request.app.state.controller.snapshot())
 
 
-class SessionIn(BaseModel):
-    track_name: str
-    scenery: str = ""
-    quad_type: str = ""
-    quad_size: str = ""
-    race_laps: int = 0
-    race_mode: str = ""
-    # From the track picker; 0 / "" when the name was typed by hand.
-    track_id: int = 0
-    scene_id: int = 0
-    track_source: str = ""
-    # From the quad picker (catalog model id); 0 = unknown quad.
-    quad_model_id: int = 0
-    quad_class_id: int = 0
-    # Re-attribute this run too (the "did you change tracks?" prompt).
-    apply_to_race_id: int = 0
-
-
 @router.post("/session")
 async def set_session(request: Request, body: SessionIn) -> dict[str, Any]:
-    if not body.track_name.strip():
-        raise HTTPException(400, "track_name is required")
-    if body.track_id <= 0:
-        # PBs are keyed by online track id, so a typed name is not enough.
-        raise HTTPException(400, "pick the track from the search so it has an online id")
-    controller = request.app.state.controller
-    await controller.set_manual_session(
-        body.track_name,
-        body.scenery,
-        body.quad_type,
-        body.quad_size,
-        body.race_laps,
-        body.race_mode,
-        track_id=body.track_id,
-        scene_id=body.scene_id,
-        track_source=body.track_source if body.track_source in SOURCES else "",
-        quad_model_id=max(0, body.quad_model_id),
-        quad_class_id=max(0, body.quad_class_id),
-    )
-    applied = False
-    if body.apply_to_race_id > 0:
-        s = controller.session
-        async with request.app.state.session_factory() as db:
-            race = await repos.update_race(
-                db,
-                body.apply_to_race_id,
-                track_id=s.track_id,
-                track_name=s.track_name,
-                scenery=s.scenery,
-                scene_id=s.scene_id,
-                track_source=s.track_source,
-            )
-        applied = race is not None
-        await controller.refresh_reference()
-    return dict(controller.session.to_dict()) | {"applied": applied}
-
-
-class CaptureIn(BaseModel):
-    enabled: bool
+    state = request.app.state
+    try:
+        return await commands.set_session(state.controller, state.session_factory, body)
+    except commands.CommandError as e:
+        raise HTTPException(e.status, e.detail) from e
 
 
 @router.post("/capture")
 async def capture(request: Request, body: CaptureIn) -> dict[str, Any]:
     """Pause or resume recording; paused keeps the game link but ignores races."""
-    controller = request.app.state.controller
-    await controller.set_capture(body.enabled)
-    return {"enabled": controller.capture}
+    return await commands.set_capture(request.app.state.controller, body)
 
 
 @router.get("/quads")
@@ -148,20 +96,11 @@ async def connection(request: Request, body: ConnectionIn) -> dict[str, Any]:
     return dict(bridge.status())
 
 
-class AbortIn(BaseModel):
-    in_game: bool = True  # also send the game's abortrace command when connected
-
-
 @router.post("/race/abort")
 async def race_abort(request: Request, body: AbortIn | None = None) -> dict[str, Any]:
     """Manual abort: the timer got stuck (game closed mid-run) or the pilot gives up."""
-    controller = request.app.state.controller
-    bridge = request.app.state.bridge
-    sent = False
-    if (body is None or body.in_game) and controller.race_active:
-        sent = await bridge.abort_race()
-    race_id = await controller.abort_race("manual")
-    return {"aborted": race_id is not None, "race_id": race_id, "in_game": sent}
+    state = request.app.state
+    return await commands.abort(state.controller, state.bridge, body or AbortIn())
 
 
 @router.get("/races")

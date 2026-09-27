@@ -366,6 +366,54 @@ required for a run to record.
   explicit twin management are not built; label each twin's cluster to its own
   track and identification flags the ambiguity.
 
+## Relay: the node's live view on the web (0.10.0, sync phase 5, #14)
+
+Opt-in (`relay_enabled`, Settings → *Send runs to another Splitter* → *Relay
+the live view to it*), off by default, and **never needed for a run to record**.
+Ryan's reason: the tablet installs the https *web* (LXC behind Caddy) as a PWA
+and gets the live view and the track picker there, so the node stays plain
+http on the LAN and https on local installs (#21) is not needed.
+
+- **Node side** (`sync/relay.py::Relay`, supervised next to the uploader;
+  `app.state.relay`, `controller.relay`). With the switch on, an upstream
+  configured and not `web_mode`, it holds an outbound websocket to
+  `<upstream>/ws/relay` (`relay_url`: http→ws, https→wss, the OS trust store
+  via `truststore`) with the same bearer token and `X-Splitter-Node[-Id]`
+  headers as the uploader. On connect it sends `{"type":"snapshot"}`, then
+  every `LiveHub` message (one more subscriber). Down the socket come
+  `session` / `capture` / `abort` / `snapshot` frames with an `id`; each is
+  answered with `{"type":"reply","id",…,"ok",…}`. The commands are the same
+  code the node's own `/api/session`, `/api/capture` and `/api/race/abort`
+  run (`sync/commands.py`), so the controller is the only thing that changes
+  state. Reconnects with backoff (2 s → 60 s); a 44xx close from the web
+  (`4401` bad token, `4403` receiving off, `4400` no node id) is `refused`
+  and retried every 2 min. `Relay.status()` is in the snapshot as `relay` and
+  broadcast as `relay` on state changes. The transport is injectable
+  (`app.state.relay_connect`); tests join node and web with a queue pair.
+- **Web side** (`live/relay.py`: `RelayRegistry` at `app.state.relays`, one
+  `RelayNode` per connected node with its own `LiveHub` for the browsers
+  watching it; `web/routes/relay.py`). `/ws/relay` takes the node (token
+  check, `repos.note_node` so it appears under *Receiving from*), fans its
+  messages out and folds them into `RelayNode.snapshot` so a page opened
+  mid-run renders from the latest state; `/ws/live/<node>` is the browser
+  feed (last snapshot at once, then a fresh one asked from the node; a node
+  that is not relaying gets `{"type":"node","data":{"connected":false}}` and a
+  hang-up, and the page's link retries). `/live/<node>` is the ordinary
+  `live.html` with `relay_node` set: `window.SPLITTER_LIVE_WS` and
+  `window.SPLITTER_API = /api/relay/<node>` make `link.js` / `live.js` ride
+  the relayed feed and send commands to `POST /api/relay/<node>/{session,
+  capture,race/abort}` (awaits the node's reply, 10 s → 504; the node's own
+  4xx comes back as is). `/live/nodes` lists who is relaying. In web mode
+  `/` redirects to the one relaying node (else Races) and the nav shows
+  *Live* only while a node relays; the Races page's *Receiving from* gets a
+  *live* pill. The node's Game / IMU indicators are shown on the relayed page
+  even on a web.
+- **No-IMU notification** (rolled in from #13): `live.js` raises one browser
+  `Notification` per page session when `imu_warning` arrives with
+  `missing: true` (reset when it clears), on the node's own page and on the
+  relayed one. Permission is requested on the first click on the page.
+  Nothing fires from the service itself: LocalSystem has no desktop.
+
 ## Wire facts to remember
 
 All race-event scalars are strings (`"3"`, `"69.711"`, `"True"`), `uid` in

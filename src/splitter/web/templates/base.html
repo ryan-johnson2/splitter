@@ -48,7 +48,8 @@
           onclick="var h=document.getElementById('top'); h.classList.toggle('open'); this.setAttribute('aria-expanded', h.classList.contains('open'))">☰</button>
   <nav id="main-nav">
     {% set path = request.url.path %}
-    {% if not web_mode %}<a href="/" {% if path == "/" %}class="active"{% endif %}>Live</a>{% endif %}
+    {% if not web_mode %}<a href="/" {% if path == "/" %}class="active"{% endif %}>Live</a>
+    {% elif live_nodes %}<a href="{{ relay_live_url }}" {% if path.startswith("/live") %}class="active"{% endif %} title="the live view relayed by {{ live_nodes | map(attribute="label") | join(", ") }}">Live</a>{% endif %}
     {% if web_mode or not upstream_url or keep_local_runs %}
     <a href="/races" {% if path.startswith("/races") %}class="active"{% endif %}>Races</a>
     <a href="/tracks" {% if path.startswith("/tracks") %}class="active"{% endif %}>Tracks</a>
@@ -58,9 +59,9 @@
   </nav>
   <span class="who">
     <button type="button" class="ind" id="ind-link" data-help="link" title="this page's link to Splitter — tap for help"><span class="conn busy" id="link-dot"></span> <span class="ind-name">Splitter</span> <span id="link-label">connecting</span></button>
-    {% if not web_mode %}<button type="button" class="ind" id="ind-game" data-help="game" title="Splitter's connection to VelociDrone — tap for help"><span class="conn {% if game_connected %}on{% endif %}" id="game-dot"></span> <span class="ind-name">Game</span> <span id="game-label">{{ "connected" if game_connected else "offline" }}</span></button>
+    {% if not web_mode or relay_node %}<button type="button" class="ind" id="ind-game" data-help="game" title="Splitter's connection to VelociDrone — tap for help"><span class="conn {% if game_connected %}on{% endif %}" id="game-dot"></span> <span class="ind-name">Game</span> <span id="game-label">{{ "connected" if game_connected else "offline" }}</span></button>
     <button type="button" class="ind" id="ind-imu" data-help="imu" title="no IMU data from the game — tap for help" hidden><span class="conn" id="imu-dot"></span> <span class="ind-name">IMU</span> <span id="imu-label">off</span></button>{% endif %}
-    {% if upstream_url and not web_mode %}<button type="button" class="ind" id="ind-web" data-help="sync" title="runs sent to the other Splitter — tap for help"><span class="conn unk" id="web-dot"></span> <span class="ind-name">Web</span> <span id="web-label">…</span></button>{% endif %}
+    {% if upstream_url and not web_mode and not relay_node %}<button type="button" class="ind" id="ind-web" data-help="sync" title="runs sent to the other Splitter — tap for help"><span class="conn unk" id="web-dot"></span> <span class="ind-name">Web</span> <span id="web-label">…</span></button>{% endif %}
   </span>
 </header>
 <main class="{% block main_class %}{% endblock %}">

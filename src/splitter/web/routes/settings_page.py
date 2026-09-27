@@ -34,6 +34,7 @@ async def settings_page(request: Request) -> Any:
             "bridge": state.bridge.status(),
             "controller": state.controller,
             "sync": state.uploader.status() if hasattr(state, "uploader") else None,
+            "relay": state.relay.status() if hasattr(state, "relay") else None,
             "acked_local": await _acked_local(state),
         },
     )
@@ -78,6 +79,7 @@ async def settings_save(
     upstream_url: str = Form(""),
     upstream_token: str = Form(""),
     keep_local_runs: str = Form("1"),
+    relay_enabled: str = Form("0"),
     web_mode: str = Form("0"),
 ) -> Any:
     state = request.app.state
@@ -100,6 +102,7 @@ async def settings_save(
         "upstream_url": upstream_url.strip().rstrip("/"),
         "upstream_token": upstream_token.strip(),
         "keep_local_runs": "1" if keep_local_runs == "1" else "0",
+        "relay_enabled": "1" if relay_enabled == "1" else "0",
     }
     host_changed = values["game_host"] != settings.get("game_host") or values[
         "game_port"
@@ -108,11 +111,14 @@ async def settings_save(
     sync_changed = any(
         values[k] != settings.get(k) for k in ("upstream_url", "upstream_token", "keep_local_runs")
     )
+    relay_changed = values["relay_enabled"] != settings.get("relay_enabled")
     async with state.session_factory() as db:
         await settings.set_many(db, values)
     if sync_changed and hasattr(state, "uploader"):
         await state.uploader.reconfigure()
         await state.controller.refresh_reference()
+    if (sync_changed or relay_changed or mode_changed) and hasattr(state, "relay"):
+        state.relay.reconfigure()
     state.controller.player_name = values["player_name"] or state.controller.player_name
     if values["web_mode"] == "1":
         # A web never holds the game socket (pausing capture would keep it open,

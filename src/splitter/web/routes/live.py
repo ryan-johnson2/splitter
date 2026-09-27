@@ -18,7 +18,11 @@ router = APIRouter()
 @router.get("/", response_class=HTMLResponse)
 async def live_page(request: Request) -> Any:
     if request.app.state.settings.get_bool("web_mode"):
-        # A web records nothing: there is no live race to show. Races is home.
+        # A web records nothing of its own. With one node relaying its live feed
+        # here (#14) that node's page is home; otherwise Races is.
+        nodes = request.app.state.relays.all()
+        if len(nodes) == 1:
+            return RedirectResponse(f"/live/{nodes[0].node_id}", status_code=303)
         return RedirectResponse("/races", status_code=303)
     controller = request.app.state.controller
     return templates.TemplateResponse(

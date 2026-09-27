@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ brand_name }} · Live{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Live</h1><p class="sub">Splitters relaying their live view here.</p></div>
+{% if live %}
+<div class="card">
+  <ul class="plain">
+  {% for n in live %}<li><a class="btn" href="/live/{{ n.node_id }}">{{ n.label }}</a> <span class="muted small">since <time datetime="{{ n.connected_at }}">{{ n.connected_at }}</time></span></li>{% endfor %}
+  </ul>
+</div>
+{% else %}
+<div class="card">
+  <p class="muted">No Splitter is relaying right now.</p>
+  <p class="help">On the one that records: Settings → <i>Send runs to another Splitter</i> → this address and token, then <b>Relay the live view to it</b>.{% if not receiving %} This Splitter also needs <i>Receive runs</i> on (Settings) for the relay to be accepted.{% endif %}</p>
+</div>
+{% endif %}
+{% if known %}
+<p class="small muted">Known, not relaying: {% for k in known %}<b>{{ k.node.name or k.node.node_id[:8] }}</b> (last seen <time datetime="{{ utc_iso(k.node.last_seen_at) }}">{{ k.node.last_seen_at }}</time>){% if not loop.last %}, {% endif %}{% endfor %}.</p>
+{% endif %}
+{% endblock %}

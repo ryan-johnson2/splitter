@@ -59,7 +59,8 @@
 
   function connect() {
     var proto = location.protocol === "https:" ? "wss://" : "ws://";
-    ws = link.ws = new WebSocket(proto + location.host + "/ws/live");
+    // A relayed view (window.SPLITTER_LIVE_WS = /ws/live/<node>) rides the same code.
+    ws = link.ws = new WebSocket(proto + location.host + (window.SPLITTER_LIVE_WS || "/ws/live"));
     renderLink("connecting");
     ws.onopen = function () { opened = true; renderLink("live"); emit("open"); };
     ws.onmessage = function (ev) {
@@ -68,6 +69,7 @@
       else if (msg.type === "imu_warning") renderImu(msg.data && msg.data.missing);
       else if (msg.type === "status") renderGame(msg.data);
       else if (msg.type === "sync") renderSync(msg.data);
+      else if (msg.type === "node") { link.node = msg.data; if (msg.data && msg.data.connected === false) renderGame(null); }
       emit(msg.type, msg.data);
     };
     ws.onclose = function () { renderLink(opened ? "lost" : "connecting"); renderGame(null); renderSync(null); emit("close"); setTimeout(connect, 1500); };

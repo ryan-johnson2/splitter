@@ -89,3 +89,9 @@ Or run *Release builds* from the Actions tab with **publish = dev** and a short
 note; it cuts the next free `dev-<today>[b,c…]` tag itself and publishes a
 prerelease titled `Dev build <date> (<note>)`. Docker images for dev builds are
 tagged with the dev tag and `edge`.
+
+## Watching from a tablet (0.10.0)
+
+Settings → *Send runs to another Splitter* → **Relay the live view to it**: the
+other Splitter's *Live* page then shows this timer as it runs, and its track
+picker, pause and abort act here. Off by default; runs record either way.

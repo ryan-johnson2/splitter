@@ -4,6 +4,9 @@
   var $ = function (id) { return document.getElementById(id); };
   var state = { race: null, reference: null, session: null, lastCrossing: null, phase: "idle", speed: 0, connected: false, lastResult: null };
   var timer = null;
+  // Relayed view (#14): commands go to /api/relay/<node>/..., the web answers
+  // with what the node said. Everything else on the page is the same.
+  var API = window.SPLITTER_API || "/api", RELAY = window.SPLITTER_RELAY_NODE || null;
 
   var fmt = Splitter.fmt;  // honours the Settings "Time format"
   function fmtDelta(ms) { if (ms == null) return "--"; return (ms < 0 ? "-" : "+") + (Math.abs(ms) / 1000).toFixed(3); }
@@ -22,7 +25,7 @@
   function setPhase(phase) {
     state.phase = phase;
     var pill = $("phase");
-    var map = { idle: ["dim", "idle"], armed: ["warn", "starting"], countdown: ["warn", "countdown"], racing: ["ok", "racing"], finished: ["accent", "finished"], aborted: ["bad", "aborted"], offline: ["bad", "game offline"] };
+    var map = { idle: ["dim", "idle"], armed: ["warn", "starting"], countdown: ["warn", "countdown"], racing: ["ok", "racing"], finished: ["accent", "finished"], aborted: ["bad", "aborted"], offline: ["bad", "game offline"], nodeoff: ["bad", "not relaying"] };
     var m = map[phase] || ["dim", phase];
     pill.className = "pill " + m[0]; pill.textContent = m[1];
     // #3: in focus mode the race card owns the screen while a run is in progress.
@@ -161,6 +164,8 @@
 
   function applySnapshot(snap) {
     state.capture = snap.capture !== false; renderCapture();
+    notifyImu(!!snap.imu_missing);
+    if (RELAY) { var rs = $("relay-node-state"); if (rs) rs.textContent = ""; }
     if (snap.track_check && snap.track_check.verdict === "different") showTrackCheck(snap.track_check);
     renderConnection(snap.connection);
     renderSession(snap.session);
@@ -213,8 +218,27 @@
     race_aborted: function () { stopClock(); state.race = null; setPhase("idle"); },
     capture: function (d) { state.capture = !!d.enabled; renderCapture(); toast(state.capture ? "Capture resumed" : "Capture paused — runs are not recorded", state.capture ? "ok" : "warn"); },
     track_check: showTrackCheck,
-    notice: function (n) { toast(n.message, n.level); }
+    notice: function (n) { toast(n.message, n.level); },
+    imu_warning: function (d) { notifyImu(d && d.missing); },
+    // Relayed view: the node went away (or is not there yet); the web hangs up
+    // and the link reconnects until it is back.
+    node: function (d) { if (!d || d.connected !== false) return; stopClock(); state.race = null; setPhase("nodeoff"); var el = $("relay-node-state"); if (el) el.textContent = "— not relaying right now, waiting for it"; }
   };
+
+  // One OS notification per session when runs record without IMU data (#14):
+  // the header button is easy to miss from the couch. Browsers only allow the
+  // permission prompt from a click, so it is asked on the first tap on the page
+  // and the notification itself fires when the warning arrives.
+  var notified = false;
+  function notifyImu(missing) {
+    if (!missing) { notified = false; return; }
+    if (notified || !("Notification" in window) || Notification.permission !== "granted") return;
+    notified = true;
+    try { new Notification((RELAY ? RELAY.label + ": " : "") + "No IMU data from the game", { body: "Runs are recording without telemetry: no flight path, no crashes, no track recognition. VelociDrone: Options → Main Settings → Websocket IMU Data → Yes, then restart the game.", tag: "splitter-imu" }); } catch (e) {}
+  }
+  if ("Notification" in window && Notification.permission === "default") {
+    document.addEventListener("click", function ask() { document.removeEventListener("click", ask); try { Notification.requestPermission().catch(function () {}); } catch (e) {} }, { once: true });
+  }
 
   function connect() {
     var link = Splitter.link;
@@ -233,7 +257,7 @@
   $("btn-capture").onclick = function () {
     var next = state.capture === false;
     if (!next && state.race) { if (!confirm("Pause capture now? The current run will be aborted.")) return; }
-    fetch("/api/capture", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: next }) })
+    fetch(API + "/capture", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: next }) })
       .then(function (r) { if (!r.ok) throw new Error("failed"); }).catch(function (e) { toast(e.message, "bad"); });
   };
 
@@ -248,7 +272,7 @@
     return { track_name: t.track_name, scenery: t.scenery || "", quad_type: s.quad_type || "", quad_size: s.quad_size || "", race_laps: s.race_laps || 0, track_id: t.track_id, scene_id: t.scene_id || 0, track_source: t.track_source || "", quad_model_id: s.quad_model_id || 0, quad_class_id: s.quad_class_id || 0, apply_to_race_id: applyTo || 0 };
   }
   function postSession(body, okMsg, errMsg) {
-    return fetch("/api/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+    return fetch(API + "/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
       .then(function (r) { if (!r.ok) throw new Error(errMsg); toast(okMsg, "ok"); })
       .catch(function (e) { toast(e.message, "bad"); });
   }
@@ -314,7 +338,7 @@
                  quad_model_id: parseInt(fd.get("quad_model_id") || "0", 10) || 0, quad_class_id: parseInt(fd.get("quad_class_id") || "0", 10) || 0 };
     if (!body.track_id) { toast("Pick the track from the search — PBs need its online id", "warn"); return; }
     if (pendingApply && $("apply-last").checked) body.apply_to_race_id = pendingApply;
-    fetch("/api/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+    fetch(API + "/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
       .then(function (r) { if (!r.ok) return r.json().then(function (j) { throw new Error(j.detail || "save failed"); }); return r.json(); })
       .then(function (j) { dlg.close(); toast(j.applied ? "Track set and applied to run #" + pendingApply : "Track set", "ok"); pendingApply = 0; })
       .catch(function (e) { toast(e.message, "bad"); });
@@ -350,14 +374,14 @@
 
   $("btn-abort").onclick = function () {
     if (!confirm("Abort this run? It is kept as aborted, and the game is told to abort too.")) return;
-    fetch("/api/race/abort", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ in_game: true }) })
+    fetch(API + "/race/abort", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ in_game: true }) })
       .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.detail || "failed"); return j; }); })
       .then(function (j) { toast(j.aborted ? (j.in_game ? "Aborted here and in the game" : "Aborted (game not connected)") : "No run to abort"); })
       .catch(function (e) { toast(e.message, "bad"); });
   };
 
   $("btn-reconnect").onclick = function () {
-    fetch("/api/connection", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "connect" }) })
+    fetch(API + "/connection", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "connect" }) })
       .then(function (r) { if (!r.ok) return r.json().then(function (j) { throw new Error(j.detail || "failed"); }); toast("Reconnecting…"); })
       .catch(function (e) { toast(e.message + " — set the game PC address in Settings", "warn"); });
   };

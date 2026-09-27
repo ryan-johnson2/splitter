@@ -17,6 +17,8 @@ from splitter.version import __version__
 def _site_context(request: Any) -> dict[str, Any]:
     settings = getattr(request.app.state, "settings", None)
     bridge = getattr(request.app.state, "bridge", None)
+    relays = getattr(request.app.state, "relays", None)
+    live_nodes = relays.all() if relays is not None else []
     style = (settings.get("time_format") if settings else "") or DEFAULT_TIME_FORMAT
     return {
         "brand_name": (settings.get("brand_name").strip() if settings else "") or "Splitter",
@@ -33,6 +35,12 @@ def _site_context(request: Any) -> dict[str, Any]:
         # The desktop app's webview cannot open a new browser tab, so the "Web ↗"
         # nav link (an external page) is left out there; the Web indicator stays.
         "desktop": bool(getattr(getattr(request.app.state, "config", None), "desktop", False)),
+        # Relay (#14): nodes mirroring their live feed here right now. One node →
+        # the nav's Live goes straight to it; more → the list.
+        "live_nodes": [n.status() for n in live_nodes],
+        "relay_live_url": (
+            f"/live/{live_nodes[0].node_id}" if len(live_nodes) == 1 else "/live/nodes"
+        ),
         # Per-request override of the global so every page honours the setting.
         "format_ms": lambda ms: format_ms(ms, style),
     }

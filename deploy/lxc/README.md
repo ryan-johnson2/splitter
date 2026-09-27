@@ -156,3 +156,10 @@ certutil -addstore -f Root $env:TEMP\root.crt
 The portable app runs as you, so the user store is enough there. When the
 root is missing, the sender's Settings page says "certificate not trusted"
 and repeats these steps.
+
+**The live view on the tablet (0.10.0).** Once this web is installed as an app,
+turn on *Relay the live view to it* on the recording Splitter (its Settings →
+*Send runs to another Splitter*). The web's *Live* page then shows that timer
+as it runs and can pick the track, pause capture or abort it. Caddy passes the
+websocket through as configured above; nothing to add. The recording Splitter
+needs no https of its own for this.

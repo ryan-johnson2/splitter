@@ -360,9 +360,13 @@ single-user web the two would be the same page. The admin role and
 On a fresh web, the first ten runs across three tracks land in three
 clusters, and three labels put every one of them on the right track page.
 
-## Phase 5: relay (#14) — next, opt-in
+## Phase 5: relay (#14) — built 2026-09-27, opt-in
 
-Decided 2026-09-27 after the 0.9.0 release. The relay is **a feature the node
+Built on branch `0.10.0` the evening it was decided: `sync/relay.py` (node),
+`live/relay.py` + `web/routes/relay.py` (web), `sync/commands.py` (the
+commands both ways in share), `tests/test_relay.py` (queue-pair transport plus
+the real route through Starlette's test client), and a two-container check over
+real websockets. CLAUDE.md has the as-built notes. Decided 2026-09-27 after the 0.9.0 release. The relay is **a feature the node
 turns on** (`relay_enabled`, off by default, Settings → Send runs card): it
 never starts on its own and a run never needs it to record.
 
