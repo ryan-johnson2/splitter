@@ -416,7 +416,7 @@ with PyInstaller as a **one-dir** build and packs it as
 the private track client stays in the server artifacts; a node's picker
 proxies through its web, `api.track_search` → `Uploader.proxy_search`; the
 `--tracks … --protect` flags remain for a private local build);
-`src-tauri/` is a Tauri 2 shell that **embeds** that archive (`build.rs`), **attaches** to a Splitter already running on the machine when a `node.port` marker (service data dir, or its own) answers `/healthz` (`lib.rs::running_node`, #13) and otherwise
+`src-tauri/` is a Tauri 2 shell that **embeds** that archive (`build.rs`), ships on Windows as an **NSIS installer** whose hooks (`nsis/hooks.nsh`) run the shell's headless `--install-service` / `--remove-service` (unpack the sidecar into `C:\ProgramData\Splitter\bin`, register it as the auto-start service via `splitter-sidecar service …`; #13), **attaches** to a Splitter already running on the machine when a `node.port` marker (service data dir, or its own) answers `/healthz` (`lib.rs::running_node`, #13) and otherwise
 unpacks it once per version into `splitter-data/bin/splitter-sidecar-<version>/`
 beside the exe (older versions removed; `.unpacked` marker = archive size),
 spawns it and opens a window at its `SPLITTER_READY` URL

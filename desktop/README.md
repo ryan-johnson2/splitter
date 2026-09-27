@@ -49,6 +49,15 @@ sends its runs to. (`--tracks <path> --protect` still exists on the sidecar
 build for a private local build, but releases do not use it.) `cargo check`
 without a sidecar: `SPLITTER_ALLOW_EMPTY_SIDECAR=1`.
 
+**Windows installer.** `npx -y @tauri-apps/cli@2 build` (without `--no-bundle`)
+also produces `target/release/bundle/nsis/Splitter_<version>_x64-setup.exe`. It
+installs per machine and its hooks (`src-tauri/nsis/hooks.nsh`) run the shell's
+`--install-service`, which unpacks the sidecar into `C:\ProgramData\Splitter\bin`
+and registers it as a Windows service that starts at boot; the app window then
+attaches to that running service. Uninstalling removes the service and the
+program and keeps `C:\ProgramData\Splitter` (the runs). `/S` installs and
+uninstalls silently.
+
 CI does all of this per OS in `.github/workflows/release-builds.yml` and
 attaches the binaries to the GitHub Release for a `v*` tag. On Linux the sidecar is
 built inside a `python:3.12-bullseye` container so it links against glibc 2.31

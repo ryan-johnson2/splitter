@@ -162,10 +162,17 @@ jobs:
         with:
           node-version: 22
 
-      # Portable-only: --no-bundle compiles the shell (with the sidecar embedded by
-      # build.rs) and produces NO installers.
+      # --no-bundle compiles the shell (with the sidecar embedded by build.rs) and
+      # produces NO installers: the portable exe, on every OS.
       - name: Build the portable shell (tauri build --no-bundle)
         run: npx -y @tauri-apps/cli@2 build --no-bundle
+        working-directory: desktop/src-tauri
+      # Windows also gets the NSIS installer (#13): the same shell, plus hooks that
+      # register the sidecar as a service from boot (desktop/src-tauri/nsis/hooks.nsh).
+      # The bundler re-uses the compiled shell, so this is the NSIS step only.
+      - name: Build the Windows installer (tauri build, NSIS)
+        if: runner.os == 'Windows'
+        run: npx -y @tauri-apps/cli@2 build
         working-directory: desktop/src-tauri
 
       # Does the thing we are about to ship actually start? The shell must extract and
@@ -202,6 +209,9 @@ jobs:
           mkdir -p out
           ext=""; [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
           cp "${{ matrix.binary }}" "out/${{ matrix.artifact }}${ext}"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp desktop/src-tauri/target/release/bundle/nsis/Splitter_*-setup.exe "out/${{ matrix.artifact }}-setup.exe"
+          fi
           echo "$SPLITTER_BUILD" > "out/BUILD-${{ matrix.artifact }}.txt"
           ls -la out
       - uses: actions/upload-artifact@v4
@@ -346,9 +356,11 @@ jobs:
           body: |
             Build stamp: `${{ env.STAMP }}` (what every artifact reports as its version).
 
-            **Desktop (portable, no install):** download the file for your OS and run it. It keeps
-            its data in a `splitter-data` folder next to the executable. The binaries are **not
-            code-signed**: Windows SmartScreen warns once (*More info → Run anyway*) and Defender
+            **Windows, installed:** `splitter-windows-x64-setup.exe` installs Splitter and runs it as
+            a **service from boot** (data in `C:\ProgramData\Splitter`); the app window then just
+            attaches to it. **Desktop (portable, no install):** download the file for your OS and run
+            it. It keeps its data in a `splitter-data` folder next to the executable. The binaries
+            are **not code-signed**: Windows SmartScreen warns once (*More info → Run anyway*) and Defender
             may quarantine the download (*Protection history → Allow*); macOS Gatekeeper wants a
             right-click → *Open* once. Why, and what is done about it: `docs/code-signing.md`.
 

@@ -428,7 +428,7 @@ What is left needs a Windows machine with the game. In order:
    works as a plain user (the DACL). Note: PyInstaller must bundle pywin32
    (`pip install pywin32` before `build.py`; add `servicemanager`,
    `win32serviceutil` as hidden imports if the build drops them).
-5. **Installer.** `tauri.conf.json`: enable the NSIS bundle, `installMode`
+5. ~~DONE 2026-09-27 (recon-xps): NSIS bundle on (`perMachine`, `nsis/hooks.nsh`); the hooks call the shell's headless `--install-service` / `--remove-service`, which unpack the embedded sidecar into `C:\ProgramData\Splitter\bin\splitter-sidecar-<ver>` and run the sidecar's `service install|remove`. Silent install → service AUTO_START RUNNING, `/healthz` 200, Add/Remove entry; silent uninstall → service gone, program gone, data kept. The sidecar stays *embedded* (no resources folder needed: the hook unpacks it to a stable path itself).~~ **Installer.** `tauri.conf.json`: enable the NSIS bundle, `installMode`
    `perMachine`, an `installerHooks` NSI with `NSIS_HOOK_POSTINSTALL` running
    `service install`, `NSIS_HOOK_PREUNINSTALL` running `service remove`, and
    pre/post-update stop/start. Move the sidecar from *embedded archive* to a
@@ -437,7 +437,7 @@ What is left needs a Windows machine with the game. In order:
    `http://127.0.0.1:<port>/healthz` answers, open the window there and skip
    the sidecar; else the *Service not running* page with a *Start* button
    (`sc start Splitter`).
-7. **Data-dir migration.** First service start with an empty database copies
+7. *(Reframed 2026-09-27: the installer cannot know where a portable copy kept its data. Use the Races page's Export / Import between the portable folder and the installed service instead; a one-click "import from a portable Splitter folder" can come later if it is missed.)* **Data-dir migration.** First service start with an empty database copies
    `splitter-data/splitter.db` from the portable install if the installer
    recorded its path.
 8. **Missing-IMU OS notification** from the service or the shell (header
