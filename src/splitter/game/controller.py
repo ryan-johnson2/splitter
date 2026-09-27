@@ -66,6 +66,12 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# A run with no gate crossings is dropped only when it was a quick restart: an
+# abort inside this many seconds. Longer, or "race finished" from the game, is
+# a run the pilot flew and the game's gate data went missing — kept, with a note.
+KEEP_BLANK_AFTER_S = 15.0
+NO_GATE_DATA_NOTE = "No gate data: the game sent no crossings for this run."
+
 GAME_LOSS_GRACE_S = 10.0  # seconds without the game before a running race is aborted
 IMU_LOG_EVERY_S = 5.0  # how often an imu frame lands in the event log
 LIVE_TELEMETRY_HZ = 4.0  # live speed/position messages to the browser
@@ -135,6 +141,10 @@ class RaceController:
         # Set by the app when sync is wired up; queues kept runs for upload.
         self.sync: Uploader | None = None
         self.relay: Relay | None = None
+        # Set by the app: ask the game bridge for a fresh connection (see
+        # ``_finish_race``: a finished run with no crossings is the sign of a
+        # connection the game has stopped sending gate data on).
+        self.reconnect_game: Callable[[], None] | None = None
         self.last_track_check: dict[str, Any] | None = None
         self.race_id: int | None = None
         self.race_started_at: datetime | None = None
@@ -911,21 +921,52 @@ class RaceController:
             if race is None:
                 self._reset_race()
                 return
+            blank_finish = False
             if not aborted and (not tracker.crossings or tracker.total_ms <= 0):
-                # "race finished" without a single crossing (e.g. the game sent it
-                # for a run Splitter never saw gates for). A finished race with a
-                # zero total would become an unbeatable PB — treat it as an abort.
+                # "race finished" without a single crossing. A finished race with a
+                # zero total would become an unbeatable PB — treat it as an abort,
+                # but keep it (below): it is a run the pilot flew.
                 log.warning("race %d finished with no crossings — treating as aborted", race_id)
                 aborted = True
+                blank_finish = True
             if aborted and not tracker.crossings:
-                await db.delete(race)
-                await db.commit()
-                log.info("race %d aborted before any gate — dropped", race_id)
-                self._reset_race()
-                await self.refresh_reference()
-                self._hub.broadcast("reference", self._reference_dict())
-                self._hub.broadcast("race_aborted", {"id": race_id, "kept": False})
-                return
+                lasted = (utcnow() - race.started_at).total_seconds()
+                if not blank_finish and lasted < KEEP_BLANK_AFTER_S:
+                    # A restart before the first gate: nothing happened.
+                    await db.delete(race)
+                    await db.commit()
+                    log.info("race %d aborted before any gate — dropped", race_id)
+                    self._reset_race()
+                    await self.refresh_reference()
+                    self._hub.broadcast("reference", self._reference_dict())
+                    self._hub.broadcast("race_aborted", {"id": race_id, "kept": False})
+                    return
+                # The game said finished (or the run went on for a while) and not
+                # one gate crossing arrived while countdown, status and IMU did
+                # (2026-09-27, the gaming PC: a 56 s run vanished). Keep the run,
+                # say so, and ask for a fresh game connection — the game had
+                # stopped sending gate data on this one.
+                if not race.notes:
+                    race.notes = NO_GATE_DATA_NOTE
+                log.warning(
+                    "race %d: %s after %.0f s with no gate data from the game — kept as aborted",
+                    race_id,
+                    "finished" if blank_finish else "aborted",
+                    lasted,
+                )
+                self._hub.broadcast(
+                    "notice",
+                    {
+                        "message": (
+                            f"The game sent no gate crossings for that run (kept as aborted, "
+                            f"run #{race_id}). Reconnecting to the game; if it happens again, "
+                            "restart VelociDrone."
+                        ),
+                        "level": "warn",
+                    },
+                )
+                if blank_finish and self.reconnect_game is not None:
+                    self.reconnect_game()
             race.status = "aborted" if aborted else "finished"
             race.ended_at = utcnow()
             race.total_laps = len(tracker.laps)

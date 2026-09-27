@@ -273,13 +273,38 @@ async def test_finish_without_crossings_is_not_a_pb(
     q = hub.subscribe()
     await controller.handle_event(h.status("start"))
     await controller.handle_event(h.countdown(0))
+    reconnects: list[int] = []
+    controller.reconnect_game = lambda: reconnects.append(1)
     await controller.handle_event(h.status("race finished"))  # no racedata at all
-    kinds = [m["type"] for m in h.drain(q)]
-    assert "race_aborted" in kinds and "race_finished" not in kinds
+    msgs = h.drain(q)
+    ended = [m["data"] for m in msgs if m["type"] == "race_finished"]
+    assert len(ended) == 1 and ended[0]["aborted"] and not ended[0]["is_best"]
+    # Kept as aborted with a note (2026-09-27: a 56 s run the game finished
+    # vanished because no gate data came), the page told, the game reconnected.
     async with session_factory() as db:
         rows = (await db.execute(select(Race).order_by(Race.id))).scalars().all()
-        assert [(r.id, r.status, r.is_best) for r in rows] == [(1, "finished", True)]
+        assert [(r.id, r.status, r.is_best) for r in rows] == [
+            (1, "finished", True),
+            (2, "aborted", False),
+        ]
+        assert rows[1].notes.startswith("No gate data")
+    assert any(m["type"] == "notice" and "no gate crossings" in m["data"]["message"] for m in msgs)
+    assert reconnects == [1]
     assert controller.snapshot()["reference"]["race_id"] == 1
+
+
+async def test_a_quick_restart_before_the_first_gate_is_dropped(
+    controller: RaceController, hub: LiveHub, session_factory
+) -> None:
+    await controller.handle_event(h.session())
+    q = hub.subscribe()
+    await controller.handle_event(h.status("start"))
+    await controller.handle_event(h.countdown(0))
+    await controller.handle_event(h.status("abort"))  # restart within seconds, no gate
+    kinds = [m["type"] for m in h.drain(q)]
+    assert "race_aborted" in kinds
+    async with session_factory() as db:
+        assert (await db.execute(select(Race))).scalars().all() == []
 
 
 async def test_zero_total_never_reference(session_factory) -> None:

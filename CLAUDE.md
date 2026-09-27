@@ -107,6 +107,23 @@ racestatus:"race finished" / "abort"
 - Which racedata entry is "me": the `player_name` setting, else the only
   pilot, else skip with a one-time notice.
 
+### A run with no gate data (0.10.0)
+
+2026-09-27 on the gaming PC: from one restart on, the game kept sending
+countdown, race status, the GO marker and IMU on the service's connection but
+**no `racedata` at all** (one client on port 60003, the same connection since
+20:23 UTC — nothing stole the feed). A 56 s run the game reported finished had
+zero crossings, was treated as an abort, and an abort with no gate was
+*dropped*: it vanished without a trace. Now (`controller._finish_race`,
+`KEEP_BLANK_AFTER_S` = 15 s): a quick restart before the first gate is still
+dropped; a run the game says **finished**, or any abort after 15 s, with no
+crossings is **kept as aborted** with `notes = NO_GATE_DATA_NOTE`, the live
+page gets a `notice` toast, and on the finished case the controller asks the
+bridge for a fresh game connection (`controller.reconnect_game =
+bridge.reconnect`, set in `app.py`), since the game had stopped sending gate
+data on that one. Whether a reconnect actually restores it is still to be
+confirmed against the game.
+
 ## Telemetry (IMU)
 
 Opt-in in the game (`web-socket-imu`, Betaflight FC only), 60 Hz, local drone

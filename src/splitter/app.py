@@ -119,6 +119,7 @@ def create_app(config: Config | None = None) -> FastAPI:
 
         bridge = GameBridge(on_event=controller.handle_event, on_state=on_state)
         relay.bridge = bridge
+        controller.reconnect_game = bridge.reconnect
         if (
             settings.get_bool("auto_connect")
             and settings.get("game_host")
