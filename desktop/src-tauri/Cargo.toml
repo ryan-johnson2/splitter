@@ -40,6 +40,8 @@ flate2 = "1"
 # Service Control Manager in milliseconds and supervises the Python sidecar as a child.
 # The sidecar's own pywin32 service mode timed out the SCM on a real gaming PC (#13).
 windows-service = "0.7"
+# The notification-area icon (features on a target-specific entry add to the main one).
+tauri = { version = "2", features = ["tray-icon"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # PR_SET_PDEATHSIG: the kernel signals the sidecar when this shell dies, whatever

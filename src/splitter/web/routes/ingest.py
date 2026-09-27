@@ -36,12 +36,11 @@ def _require_token(request: Request) -> None:
 @router.get("/ingest/ping")
 async def ingest_ping(request: Request) -> dict[str, Any]:
     _require_token(request)
-    return {
-        "ok": True,
-        "version": __version__,
-        "doc_version": DOC_VERSION,
-        "name": request.app.state.settings.get("node_name"),
-    }
+    settings = request.app.state.settings
+    name = settings.get("node_name").strip()
+    if settings.get_bool("web_mode") or not name:
+        name = settings.get("brand_name").strip() or "Splitter"
+    return {"ok": True, "version": __version__, "doc_version": DOC_VERSION, "name": name}
 
 
 @router.put("/ingest/runs/{uuid}")

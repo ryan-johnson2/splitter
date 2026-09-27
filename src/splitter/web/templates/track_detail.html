@@ -7,7 +7,8 @@
 {% if not track_id and races %}
 <div class="card" id="assign-track">
   <h2>Give these runs a track</h2>
-  <p class="help">These {{ races | length }} runs have no online track id, so none of them can be a personal best. Pick the track they were flown on and every run in this group is re-attributed at once (the same as bulk edit on Races).</p>
+  <p class="help">These {{ races | length }} runs have no online track id, so none of them can be a personal best. Pick the track they were flown on and every run in this group is re-attributed at once (the same as bulk edit on Races). Or let Splitter try first: <button type="submit" form="identify-form" class="btn sm" title="match their gate positions against every known layout, and carry the previous run's track where nothing says otherwise">Find their tracks</button></p>
+  <form method="post" action="/races/identify" id="identify-form"></form>
   <form method="post" action="/races/bulk" id="assign-track-form">
     {% for r in races %}<input type="hidden" name="race_ids" value="{{ r.id }}">{% endfor %}
     <div class="field" id="assign-track-picker" style="margin-top:.6rem">

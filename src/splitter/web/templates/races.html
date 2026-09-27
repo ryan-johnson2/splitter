@@ -19,7 +19,8 @@
 </div>
 <form method="post" action="/races/identify" id="identify-form"></form>
 {% elif unidentified_count %}
-<p class="small muted"><a href="/races?unidentified=1">{{ unidentified_count }} run{{ "s" if unidentified_count != 1 }} with no track yet</a> — pick their tracks so they can be personal bests.</p>
+<p class="small muted"><a href="/races?unidentified=1">{{ unidentified_count }} run{{ "s" if unidentified_count != 1 }} with no track yet</a> — pick their tracks so they can be personal bests, or <button type="submit" form="identify-form" class="btn sm" title="match their gate positions against every known layout, and carry the previous run's track where nothing says otherwise">Find their tracks</button></p>
+<form method="post" action="/races/identify" id="identify-form"></form>
 {% endif %}
 {% if nodes %}
 <p class="small muted" id="nodes">Receiving from

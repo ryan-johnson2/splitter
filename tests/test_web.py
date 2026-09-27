@@ -701,3 +701,35 @@ async def test_track_page_offers_to_assign_a_track_to_a_no_id_group(client: Asyn
     # A group that has an id shows no such card.
     html = (await client.get("/tracks/detail", params={"track_id": 40001})).text
     assert 'id="assign-track"' not in html
+
+
+async def test_web_mode_always_receives_and_has_no_install_name(tmp_path: Any) -> None:
+    app = create_app(Config(database_url=f"sqlite+aiosqlite:///{tmp_path}/w.db"))
+    app.state.catalog = _FakeCatalog()
+    app.state.sync_autorun = False
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://web") as c,
+    ):
+        assert app.state.settings.get("ingest_token") == ""
+        # Turning web mode on turns receiving on with a fresh token.
+        r = await c.post("/settings", data={"web_mode": "1"}, follow_redirects=False)
+        assert r.status_code == 303
+        token = app.state.settings.get("ingest_token")
+        assert len(token) > 20
+        page = (await c.get("/settings")).text
+        assert "Turn receiving off" not in page and "always receives" in page
+        assert 'name="node_name"' not in page
+        # ...and receiving cannot be turned off while in it.
+        r = await c.post(
+            "/settings/ingest-token", data={"action": "disable"}, follow_redirects=False
+        )
+        assert r.status_code == 303 and "always+receives" in r.headers["location"]
+        assert app.state.settings.get("ingest_token") == token
+        # A node pinging a web hears its brand, not an install name.
+        r = await c.get("/api/ingest/ping", headers={"Authorization": f"Bearer {token}"})
+        assert r.json()["name"] == "Splitter"
+        # Back to a timer: the switch is back.
+        r = await c.post("/settings", data={"web_mode": "0"}, follow_redirects=False)
+        page = (await c.get("/settings")).text
+        assert "Turn receiving off" in page and 'name="node_name"' in page

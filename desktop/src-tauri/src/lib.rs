@@ -33,7 +33,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
 /// The sidecar archive (tar.gz of the one-dir build), embedded at build time (see `build.rs`).
 static SIDECAR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sidecar.bin"));
@@ -142,7 +142,22 @@ pub fn run() {
             .build()?;
 
             app.manage(Sidecar(Mutex::new(child)));
+            app.manage(NodeUrl(url));
+            #[cfg(windows)]
+            tray::install(app)?;
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Windows: the timer lives in the service (or in this shell's own sidecar),
+            // so closing the window only hides it; the tray icon brings it back and
+            // has Quit. Elsewhere a close is a quit, as before.
+            #[cfg(windows)]
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+            #[cfg(not(windows))]
+            let _ = (window, event);
         })
         .build(tauri::generate_context!())
         .expect("error while building the Splitter desktop app")
@@ -153,6 +168,73 @@ pub fn run() {
                 }
             }
         });
+}
+
+/// Where the pages are (the attached service, or this shell's own sidecar).
+struct NodeUrl(String);
+
+/// Bring the window back (from hidden or minimised), optionally on a page.
+fn show_window(app: &AppHandle, path: Option<&str>) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    if let (Some(path), Some(base)) = (path, app.try_state::<NodeUrl>()) {
+        if let Ok(url) = format!("{}{}", base.0.trim_end_matches('/'), path).parse() {
+            let _ = window.navigate(url);
+        }
+    }
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+/// The notification-area icon (Windows): left-click opens the window; the menu
+/// jumps to a page or quits. Quit ends this shell only — the service keeps timing.
+#[cfg(windows)]
+mod tray {
+    use super::show_window;
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+    use tauri::{App, Manager};
+
+    pub fn install(app: &App) -> tauri::Result<()> {
+        let open = MenuItem::with_id(app, "open", "Open Splitter", true, None::<&str>)?;
+        let live = MenuItem::with_id(app, "live", "Live", true, None::<&str>)?;
+        let races = MenuItem::with_id(app, "races", "Races", true, None::<&str>)?;
+        let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
+        let quit = MenuItem::with_id(app, "quit", "Quit Splitter", true, None::<&str>)?;
+        let menu = Menu::with_items(
+            app,
+            &[&open, &live, &races, &settings, &PredefinedMenuItem::separator(app)?, &quit],
+        )?;
+        let mut tray = TrayIconBuilder::with_id("splitter")
+            .menu(&menu)
+            .show_menu_on_left_click(false)
+            .tooltip("Splitter")
+            .on_menu_event(|app, event| match event.id.as_ref() {
+                "open" => show_window(app, None),
+                "live" => show_window(app, Some("/")),
+                "races" => show_window(app, Some("/races")),
+                "settings" => show_window(app, Some("/settings")),
+                "quit" => app.exit(0),
+                _ => {}
+            })
+            .on_tray_icon_event(|tray, event| {
+                if let TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                } = event
+                {
+                    show_window(tray.app_handle(), None);
+                }
+            });
+        if let Some(icon) = app.default_window_icon() {
+            tray = tray.icon(icon.clone());
+        }
+        tray.build(app)?;
+        Ok(())
+    }
 }
 
 /// `--install-service` / `--remove-service` (the installer's hooks, run elevated): unpack the

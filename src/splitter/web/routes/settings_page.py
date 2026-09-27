@@ -51,6 +51,11 @@ async def _acked_local(state: Any) -> int:
 async def ingest_token(request: Request, action: str = Form("generate")) -> Any:
     """Turn receiving on (a fresh token), rotate it, or turn it off."""
     state = request.app.state
+    if action != "generate" and state.settings.get_bool("web_mode"):
+        # A web-only Splitter exists to receive: nodes would have nowhere to send.
+        return redirect_with_flash(
+            "/settings#receive", error="A web-only Splitter always receives runs."
+        )
     value = secrets.token_urlsafe(32) if action == "generate" else ""
     async with state.session_factory() as db:
         await state.settings.set(db, "ingest_token", value)
@@ -112,6 +117,9 @@ async def settings_save(
         values[k] != settings.get(k) for k in ("upstream_url", "upstream_token", "keep_local_runs")
     )
     relay_changed = values["relay_enabled"] != settings.get("relay_enabled")
+    if values["web_mode"] == "1" and not settings.get("ingest_token").strip():
+        # Web-only means receiving: turn it on with a fresh token as the mode is set.
+        values["ingest_token"] = secrets.token_urlsafe(32)
     async with state.session_factory() as db:
         await settings.set_many(db, values)
     if sync_changed and hasattr(state, "uploader"):
