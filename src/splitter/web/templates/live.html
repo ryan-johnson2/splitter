@@ -1,6 +1,15 @@
 {% extends "base.html" %}
 {% block title %}{{ brand_name }} · Live{% if relay_node %} · {{ relay_node.label }}{% endif %}{% endblock %}
 {% block main_class %}wide{% endblock %}
+{% block head %}{% if relay_node %}
+<script>
+  // Before link.js runs (it connects on load): this page rides the relayed feed
+  // and sends its commands to the node through the web (#14).
+  window.SPLITTER_RELAY_NODE = {{ relay_node | tojson }};
+  window.SPLITTER_LIVE_WS = "/ws/live/{{ relay_node.node_id }}";
+  window.SPLITTER_API = "/api/relay/{{ relay_node.node_id }}";
+</script>
+{% endif %}{% endblock %}
 {% block content %}
 {% if relay_node %}<div class="flash notice relay-banner" id="relay-banner">Live from <b>{{ relay_node.label }}</b>, relayed. Track, capture and abort act on that Splitter. <span class="muted small" id="relay-node-state"></span></div>{% endif %}
 <div class="state-banner" id="banner">
@@ -122,7 +131,7 @@
 <div class="toast-wrap" id="toasts"></div>
 {% endblock %}
 {% block scripts %}
-<script>{% if relay_node %}window.SPLITTER_RELAY_NODE = {{ relay_node | tojson }}; window.SPLITTER_LIVE_WS = "/ws/live/{{ relay_node.node_id }}"; window.SPLITTER_API = "/api/relay/{{ relay_node.node_id }}";{% endif %} window.SPLITTER_SNAPSHOT = {{ snapshot | tojson }}; window.SPLITTER_GAME_HOST_SET = {{ game_host_set | tojson }}; window.SPLITTER_EVER_CONNECTED = {{ game_ever_connected | tojson }}; window.SPLITTER_TRACK_EVER_SET = {{ track_ever_set | tojson }};</script>
+<script>window.SPLITTER_SNAPSHOT = {{ snapshot | tojson }}; window.SPLITTER_GAME_HOST_SET = {{ game_host_set | tojson }}; window.SPLITTER_EVER_CONNECTED = {{ game_ever_connected | tojson }}; window.SPLITTER_TRACK_EVER_SET = {{ track_ever_set | tojson }};</script>
 <script src="/static/picker.js?v={{ app_version }}"></script>
 <script src="/static/live.js?v={{ app_version }}"></script>
 {% endblock %}

@@ -192,6 +192,9 @@ async def test_relay_mirrors_the_feed_and_takes_commands(
     r = await web.client.get(f"/live/{node_id}")
     assert r.status_code == 200 and "relayed" in r.text and "gaming pc" in r.text
     assert f'"/ws/live/{node_id}"' in r.text and f'"/api/relay/{node_id}"' in r.text
+    # ...and both are set before link.js loads, which connects the socket on load
+    # (2026-09-27: they came after it, so the tablet watched the web's own feed).
+    assert r.text.index(f'"/ws/live/{node_id}"') < r.text.index("/static/link.js")
     assert 'id="ind-game"' in r.text  # the node's game indicator, even on a web
     r = await web.client.get("/live/nodes")
     assert r.status_code == 200 and "gaming pc" in r.text
