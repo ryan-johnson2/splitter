@@ -112,21 +112,34 @@ recent runs from inside the container.
 ## 6. HTTPS and installing it as an app (PWA)
 
 The box has no public DNS name, so there is no Let's Encrypt. `caddy/` puts
-Caddy in front of Splitter with a certificate from Caddy's **internal CA**,
-keeping plain http as well:
+Caddy in front of Splitter with a certificate from **your own ACME CA** — a
+[step-ca](https://smallstep.com/docs/step-ca) on the LAN, say — keeping plain
+http as well:
 
 ```sh
 scp -r deploy/lxc/caddy root@<container>:/root/caddy
-./caddy/install-caddy.sh splitter.lan.example   # inside the container; default: hostname -f
+# inside the container:
+ACME_CA=https://ca.example.lan/acme/acme/directory \
+ROOTS_URL=https://ca.example.lan/roots.pem \
+ROOT_SHA256=<sha-256 fingerprint of that root> \
+./caddy/install-caddy.sh splitter.example.lan   # default name: hostname -f
 ```
 
 The name you pass is what the certificate is issued for, so open Splitter by
-that name (give it a DNS entry or a static lease on your router). It serves the
-CA root at `http://<that name>/splitter-ca.crt` (also `/root/splitter-ca.crt`).
-Install that once on the tablet (Android: Settings → Security → Encryption &
-credentials → Install a certificate → CA certificate; iPadOS: open the file,
-then Settings → General → VPN & Device Management → install, and Settings →
-General → About → Certificate Trust Settings → enable). After that
-`https://<that name>/` is trusted, Chrome offers **Install app**, and the
-service worker keeps the pages available if the server blips. iPadOS also does
-"Add to Home Screen" over plain http, without the certificate.
+that name (give it a DNS entry or a static lease on your router; the CA must
+resolve it too, since it validates over TLS-ALPN-01 on 443 or HTTP-01 on 80).
+The installer fetches the CA root, **refuses it unless the fingerprint
+matches** `ROOT_SHA256`, adds it to the container's trust store, and serves
+it at `http://<that name>/splitter-ca.crt`. Install that once on any device
+that does not already trust your CA (Android: Settings → Security →
+Encryption & credentials → Install a certificate → CA certificate; iPadOS:
+open the file, then Settings → General → VPN & Device Management → install,
+and Settings → General → About → Certificate Trust Settings → enable). After
+that `https://<that name>/` is trusted, Chrome offers **Install app**, and
+the service worker keeps the pages available if the server blips. Caddy
+renews the leaf on its own. iPadOS also does "Add to Home Screen" over plain
+http, without the certificate.
+
+A Splitter that **sends runs** to this one verifies the certificate against
+its own machine's trust store, so a desktop that trusts your CA's root can
+use the `https://` address; otherwise use the plain `http://` LAN address.

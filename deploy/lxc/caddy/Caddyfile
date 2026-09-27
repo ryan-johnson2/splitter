@@ -1,19 +1,22 @@
 # Splitter behind Caddy on the LXC. Template: install-caddy.sh replaces
-# __HOST__ with the box's hostname (its argument, else `hostname -f`).
+# __HOST__ with the box's hostname (its argument, else `hostname -f`) and
+# __ACME_CA__ / __EMAIL__ with the ACME directory and account email.
 #
-# https with a certificate from Caddy's own internal CA — the box has no
-# public DNS name, so Let's Encrypt is not an option. Install the CA root
-# (/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt) on the
-# tablet once and the site is trusted, which is what lets Android Chrome
-# install Splitter as a PWA. Plain http is kept as well (no forced redirect)
-# so a device without the root cert still works.
+# https with a certificate from your own ACME CA (step-ca, say) — the box has
+# no public DNS name, so Let's Encrypt is not an option, but an internal ACME
+# CA works the same way and every device that trusts that CA's root trusts
+# the site, which is what lets Android Chrome install Splitter as a PWA.
+# Plain http is kept as well (no forced redirect) so a device without the
+# root cert still works. The root is served at /splitter-ca.crt for tablets.
 {
-	# No public reachability: don't try ACME at all.
+	# Keep plain http alongside https.
 	auto_https disable_redirects
+	email __EMAIL__
+	acme_ca __ACME_CA__
+	acme_ca_root /etc/ssl/certs/splitter-acme-root.pem
 }
 
-__HOST__, splitter {
-	tls internal
+__HOST__ {
 	reverse_proxy 127.0.0.1:8100
 	encode gzip
 }
