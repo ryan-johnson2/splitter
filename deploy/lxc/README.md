@@ -141,5 +141,18 @@ renews the leaf on its own. iPadOS also does "Add to Home Screen" over plain
 http, without the certificate.
 
 A Splitter that **sends runs** to this one verifies the certificate against
-its own machine's trust store, so a desktop that trusts your CA's root can
-use the `https://` address; otherwise use the plain `http://` LAN address.
+its own machine's trust store, so a PC that trusts your CA's root can use
+the `https://` address; otherwise use the plain `http://` LAN address.
+
+**Installed on Windows, the sender runs as a service** (LocalSystem), and a
+service does not see the root you imported for *your* user — the one Chrome
+uses. Put the root in the **machine** store instead, from an elevated prompt:
+
+```powershell
+Invoke-WebRequest http://<this host>/splitter-ca.crt -OutFile $env:TEMP\root.crt
+certutil -addstore -f Root $env:TEMP\root.crt
+```
+
+The portable app runs as you, so the user store is enough there. When the
+root is missing, the sender's Settings page says "certificate not trusted"
+and repeats these steps.

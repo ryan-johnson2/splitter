@@ -58,6 +58,11 @@ attaches to that running service. Uninstalling removes the service and the
 program and keeps `C:\ProgramData\Splitter` (the runs). `/S` installs and
 uninstalls silently.
 
+Because the service runs as LocalSystem, a web reached over `https://` with a
+private CA needs that CA's root in the **machine** Trusted Root store, not
+just your user's (`certutil -addstore -f Root root.crt`, elevated) — see
+`deploy/lxc/README.md` §6.
+
 CI does all of this per OS in `.github/workflows/release-builds.yml` and
 attaches the binaries to the GitHub Release for a `v*` tag. On Linux the sidecar is
 built inside a `python:3.12-bullseye` container so it links against glibc 2.31
