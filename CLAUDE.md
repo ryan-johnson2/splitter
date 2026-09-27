@@ -335,7 +335,7 @@ required for a run to record.
   (`splitter/service.py`): renders and registers a systemd system unit, a
   launchd daemon, or `sc create` for `splitter-sidecar --service` (Windows
   service mode in `desktop_entry.py::_run_as_windows_service`, pywin32 via the
-  `service` extra, **untested on Windows**: the phase 3 spike). The sidecar
+  `service` extra; verified on Windows 11 2026-09-27 — see the sync plan step 4). The sidecar
   writes `node.port` / `node.pid` in the data dir while bound.
 - **Not built yet** (rest of #13): the installer (Tauri NSIS bundle with
   service hooks), the window attaching to a running service via `node.port`,
