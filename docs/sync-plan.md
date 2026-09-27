@@ -433,7 +433,7 @@ What is left needs a Windows machine with the game. In order:
    `service install`, `NSIS_HOOK_PREUNINSTALL` running `service remove`, and
    pre/post-update stop/start. Move the sidecar from *embedded archive* to a
    bundled `resources` folder at a stable path for the installer build.
-6. **Shell attach.** `lib.rs`: before unpacking, read `<data>/node.port`; if
+6. ~~DONE 2026-09-27 (`lib.rs::running_node`): the shell probes `node.port` in the service data dir and its own, attaches when `/healthz` answers, else spawns as before. The *Service not running* page with a Start button is not built — a stopped service just means the portable sidecar starts.~~ **Shell attach.** `lib.rs`: before unpacking, read `<data>/node.port`; if
    `http://127.0.0.1:<port>/healthz` answers, open the window there and skip
    the sidecar; else the *Service not running* page with a *Start* button
    (`sc start Splitter`).

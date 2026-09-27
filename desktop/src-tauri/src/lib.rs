@@ -11,17 +11,23 @@
 //!    one-file so nothing self-extracts into a temp folder on every launch — the
 //!    behaviour that makes unsigned PyInstaller one-file exes an antivirus false
 //!    positive (docs/code-signing.md).
-//! 3. Spawn it with `SPLITTER_DATA_DIR` set, read its stdout until it prints
-//!    `SPLITTER_READY <url>`, and open the main window at that URL. The sidecar binds all
-//!    interfaces on 8100 (fallback: ephemeral) so a tablet on the LAN can open the same
+//! 3. **Attach if a Splitter is already running** (sync phase 3, #13): a `node.port`
+//!    marker in the service's data dir (`C:\ProgramData\Splitter` and friends —
+//!    `splitter/service.py::default_data_dir`) or in our own, whose `/healthz` answers,
+//!    means the server is up (installed as a service, or another window's sidecar). Then
+//!    this is just a window onto it: no unpack, no spawn, nothing to kill.
+//! 4. Otherwise spawn the sidecar with `SPLITTER_DATA_DIR` set, read its stdout until it
+//!    prints `SPLITTER_READY <url>`, and open the main window at that URL. The sidecar binds
+//!    all interfaces on 8100 (fallback: ephemeral) so a tablet on the LAN can open the same
 //!    pages; the window itself always uses loopback.
-//! 4. Kill the sidecar when the app exits.
+//! 5. Kill the sidecar when the app exits (only the one we started).
 //!
 //! Diagnostics: release builds on Windows have no console (`main.rs`), so everything
 //! this shell wants to say goes to `<data>/splitter-desktop.log` as well as stderr.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, OnceLock};
@@ -90,9 +96,23 @@ pub fn run() {
                 data_dir.display()
             ));
 
-            let exe = extract_sidecar(&data_dir)?;
-            let (child, url) = spawn_sidecar(&exe, &data_dir)?;
-            log(format!("sidecar ready — opening {url}"));
+            // A server already running here (the Windows service, or another window's
+            // sidecar) is the one to show: starting a second would fight it for 8100 and
+            // for the game, which feeds only its newest client.
+            let mut candidates: Vec<PathBuf> = service_data_dir().into_iter().collect();
+            candidates.push(data_dir.clone());
+            let (child, url) = match running_node(&candidates) {
+                Some(url) => {
+                    log(format!("attaching to the Splitter already running at {url}"));
+                    (None, url)
+                }
+                None => {
+                    let exe = extract_sidecar(&data_dir)?;
+                    let (child, url) = spawn_sidecar(&exe, &data_dir)?;
+                    log(format!("sidecar ready — opening {url}"));
+                    (Some(child), url)
+                }
+            };
 
             WebviewWindowBuilder::new(
                 &handle,
@@ -110,7 +130,7 @@ pub fn run() {
             .min_inner_size(720.0, 520.0)
             .build()?;
 
-            app.manage(Sidecar(Mutex::new(Some(child))));
+            app.manage(Sidecar(Mutex::new(child)));
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -122,6 +142,56 @@ pub fn run() {
                 }
             }
         });
+}
+
+/// Where a system-service install keeps its state — the same answer as
+/// `splitter/service.py::default_data_dir`, which is what `splitter service install` uses.
+fn service_data_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("PROGRAMDATA").map(|p| PathBuf::from(p).join("Splitter"))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Some(PathBuf::from("/Library/Application Support/Splitter"))
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Some(PathBuf::from("/var/lib/splitter"))
+    }
+}
+
+/// A Splitter already running on this machine: the first data dir whose `node.port` names a
+/// port that answers `/healthz`. The sidecar writes the marker once bound and removes it on
+/// a clean exit; a marker left by a crash names a dead port, which the probe rejects.
+fn running_node(dirs: &[PathBuf]) -> Option<String> {
+    for dir in dirs {
+        let Ok(text) = fs::read_to_string(dir.join("node.port")) else { continue };
+        let Ok(port) = text.trim().parse::<u16>() else { continue };
+        if healthz_ok(port) {
+            return Some(format!("http://127.0.0.1:{port}/"));
+        }
+        log(format!("stale node.port in {} (port {port} is not answering)", dir.display()));
+    }
+    None
+}
+
+/// `GET /healthz` on loopback with short timeouts — plain HTTP/1.0 over a socket, so the
+/// shell needs no HTTP client crate for one request at startup.
+fn healthz_ok(port: u16) -> bool {
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let Ok(mut s) = TcpStream::connect_timeout(&addr, Duration::from_millis(800)) else {
+        return false;
+    };
+    let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
+    let _ = s.set_write_timeout(Some(Duration::from_secs(2)));
+    if s.write_all(b"GET /healthz HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n").is_err() {
+        return false;
+    }
+    let mut buf = Vec::new();
+    let _ = s.read_to_end(&mut buf);
+    let text = String::from_utf8_lossy(&buf);
+    text.starts_with("HTTP/1.") && text.contains(" 200 ") && text.contains("\"ok\":true")
 }
 
 /// `splitter-data/` beside the executable when writable, else the per-user app-data dir.
