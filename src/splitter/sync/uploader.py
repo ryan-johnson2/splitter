@@ -198,13 +198,12 @@ class Uploader:
         return self._client
 
     def _headers(self) -> dict[str, str]:
+        # A blank name reached the web as "Receiving from " (2026-09-27): the
+        # machine's hostname is the honest default.
+        name = self._settings.get("node_name").strip() or socket.gethostname()
         return {
             "Authorization": f"Bearer {self._settings.get('upstream_token').strip()}",
-            # A blank name reached the web as "Receiving from " (2026-09-27): the
-            # machine's hostname is the honest default.
-            "X-Splitter-Node": (self._settings.get("node_name").strip() or socket.gethostname())[
-                :80
-            ],
+            "X-Splitter-Node": name[:80],
             "X-Splitter-Node-Id": self._settings.get("node_id"),
             "User-Agent": f"splitter/{__version__}",
         }
