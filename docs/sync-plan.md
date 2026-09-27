@@ -1,7 +1,6 @@
 # Implementation plan: capture nodes, web server, and sync
 
-Status: plan (2026-09-25, revised 2026-09-26; phases 1, 2 and 4 and the web side
-of 3 built 2026-09-26), branch `feature/cloud-sync`. The design is
+Status: phases 1 to 4 released as v0.9.0 (2026-09-27); phase 5 is next. The design is
 `docs/sync-design.md`; this is how it gets built, phase by phase, against the
 code as it stands at 0.5.2. Each phase ships on its own, keeps the current
 single-process app working, and is tracked by one GitHub issue.
@@ -361,13 +360,29 @@ single-user web the two would be the same page. The admin role and
 On a fresh web, the first ten runs across three tracks land in three
 clusters, and three labels put every one of them on the right track page.
 
-## Phase 5: relay (#14, optional)
+## Phase 5: relay (#14) — next, opt-in
 
-Unchanged from the design note. Node opens an outbound websocket to
-`<upstream>/ws/relay` with the token, mirrors `LiveHub` messages, accepts
-`session` and `abort` frames and routes them to the existing handlers. Web
-gets `/live/<node>` and a *Pick the track for gaming-pc* action. Never
-required for a run to record.
+Decided 2026-09-27 after the 0.9.0 release. The relay is **a feature the node
+turns on** (`relay_enabled`, off by default, Settings → Send runs card): it
+never starts on its own and a run never needs it to record.
+
+Node opens an outbound websocket to `<upstream>/ws/relay` with the ingest
+token, mirrors `LiveHub` messages up it (one more hub client), accepts
+`session` and `abort` frames and routes them to the existing handlers,
+reconnects with backoff like the game bridge. Web gets `/live/<node>` (the
+Live page rendered from the relayed snapshot) and a *Pick the track for
+<node>* action that sends `session` down.
+
+**Why this fixes the PWA setup.** The tablet installs the *web* as a PWA over
+Caddy's https and gets the live view and the track picker there; the node on
+the gaming PC stays plain http on the LAN. That makes https on local installs
+(#21) unnecessary for the home setup — it stays an idea, not planned.
+
+**Rolled in from phase 3:** the one OS notification per session when a node
+records with no IMU (`plyer` from the sidecar, or Tauri's notification API
+through the shell). With the relay on, the web's Live page shows the same
+warning, so the notification is the fallback for a node nobody is looking
+at.
 
 ## Phase 6: multi-user (#15)
 
@@ -398,11 +413,11 @@ after this works self-hosted.
   and phase 3 is when it starts to matter.
 - **Out of scope for this branch.** Accounts, hosting, billing, the relay.
   The branch lands phase 1 and is cut per phase after that.
-- **Later: https from Splitter itself (#21).** A node on `http://<lan-ip>:8100`
-  cannot be installed as a PWA from a phone (secure context). Settings would
-  grow a TLS block: off, a custom certificate and key handed to uvicorn, then
-  ACME against Let's Encrypt or an internal CA. Documented in the issue, not
-  built; the LXC keeps Caddy in front.
+- **Not planned: https from Splitter itself (#21).** A node on
+  `http://<lan-ip>:8100` cannot be installed as a PWA from a phone (secure
+  context); the relay (phase 5) answers that by making the https *web* the
+  place the tablet lives. The issue keeps the TLS-block design (custom cert,
+  then ACME) in case someone needs it without a web.
 
 ## Next session on the gaming PC (Windows)
 
