@@ -13,7 +13,13 @@
   "use strict";
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function q(root, sel) { return root.querySelector(sel); }
-  function named(root, name) { return root.querySelector("[name=" + name + "]"); }
+  // The named fields are usually inside the picker root; the race edit form keeps
+  // "Track name" / "Scenery" as visible inputs in the next row, so fall back to the
+  // enclosing form. (A pick used to throw on the missing field and do nothing.)
+  function named(root, name) {
+    var sel = "[name=" + name + "]", form = root.closest ? root.closest("form") : null;
+    return root.querySelector(sel) || (form && form.querySelector(sel));
+  }
 
   function trackPicker(root, opts) {
     opts = opts || {};
