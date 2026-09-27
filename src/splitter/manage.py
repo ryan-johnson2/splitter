@@ -201,7 +201,21 @@ async def _cmd_backfill_fingerprints(cfg: Config, args: argparse.Namespace) -> N
                 where = f"lap {fp.lap}, {fp.located}/{fp.gates_per_lap} gates" if fp else "none"
                 print(f"#{race.id:<5} {race.track_name[:30]:<30} {where}")
         await db.commit()
-    print(f"scanned {len(races)} runs, fingerprinted {done}")
+        # The registry learns from every attributed, fingerprinted run — not only from
+        # the ones attributed after the fingerprint code existed. Without this the LXC
+        # knew three layouts while holding 60 fingerprinted runs on seven tracks, and a
+        # pushed run on a well-known track sat in the review queue (2026-09-27).
+        learned = 0
+        stmt = select(Race).where((Race.fingerprint != "") & (Race.track_id > 0)).order_by(Race.id)
+        for race in (await db.execute(stmt)).scalars().all():
+            if await repos.learn_fingerprint(db, race) is not None:
+                learned += 1
+        identified = await repos.identify_unidentified(db) if args.identify else 0
+    print(
+        f"scanned {len(races)} runs, fingerprinted {done}, "
+        f"{learned} new layout(s) registered"
+        + (f", {identified} queued run(s) identified" if args.identify else "")
+    )
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -236,6 +250,11 @@ def main(argv: list[str] | None = None) -> None:
         "backfill-fingerprints", help="fingerprint older runs from their stored traces"
     )
     p.add_argument("--all", action="store_true", help="recompute runs that already have one")
+    p.add_argument(
+        "--identify",
+        action="store_true",
+        help="afterwards, re-run identification over the runs with no track",
+    )
     p.add_argument("-v", "--verbose", action="store_true")
     p = sub.add_parser(
         "fingerprint-stats",
