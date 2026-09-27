@@ -53,7 +53,7 @@
     <a href="/races" {% if path.startswith("/races") %}class="active"{% endif %}>Races</a>
     <a href="/tracks" {% if path.startswith("/tracks") %}class="active"{% endif %}>Tracks</a>
     {% endif %}
-    {% if upstream_url and not web_mode %}<a href="{{ upstream_url }}/races" target="_blank" rel="noopener" title="the Splitter this one sends its runs to">Web ↗</a>{% endif %}
+    {% if upstream_url and not web_mode and not desktop %}<a href="{{ upstream_url }}/races" target="_blank" rel="noopener" title="the Splitter this one sends its runs to">Web ↗</a>{% endif %}
     <a href="/settings" {% if path.startswith("/settings") %}class="active"{% endif %}>Settings</a>
   </nav>
   <span class="who">

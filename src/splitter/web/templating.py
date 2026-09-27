@@ -30,6 +30,9 @@ def _site_context(request: Any) -> dict[str, Any]:
         "keep_local_runs": settings.get_bool("keep_local_runs") if settings else True,
         # Web mode (#18): no Live page, no Game / IMU indicators, Races is home.
         "web_mode": settings.get_bool("web_mode") if settings else False,
+        # The desktop app's webview cannot open a new browser tab, so the "Web ↗"
+        # nav link (an external page) is left out there; the Web indicator stays.
+        "desktop": bool(getattr(getattr(request.app.state, "config", None), "desktop", False)),
         # Per-request override of the global so every page honours the setting.
         "format_ms": lambda ms: format_ms(ms, style),
     }

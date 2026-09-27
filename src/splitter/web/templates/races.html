@@ -94,6 +94,19 @@
 {% endblock %}
 {% block scripts %}
 <script>
+  // A run pushed by a node lands in the table without a refresh: the server says
+  // "races" on the live socket and this page reloads (coalesced, and never while
+  // the pilot is mid-edit in the bulk form).
+  (function () {
+    var timer = null;
+    Splitter.link.on("races", function () {
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        var busy = document.activeElement && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName);
+        if (!busy) location.reload();
+      }, 800);
+    });
+  })();
   // Import: read the chosen documents here, post them as one JSON list, then
   // reload with the outcome as a flash (works on an empty database too).
   document.getElementById("import-files").addEventListener("change", function (ev) {

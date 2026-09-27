@@ -95,6 +95,12 @@ async def ingest_run(request: Request, uuid: str) -> JSONResponse:
             await repos.derive_delta(db, race)
             await repos.recalculate_best(db, repos.race_key(race))
             result = repos.ImportResult(race.uuid, "created", race.id, key=repos.race_key(race))
+            # Tell every open page a run landed: the Races page reloads itself, so a
+            # web left open on the tablet shows the run without a refresh (d14).
+            state.hub.broadcast(
+                "races",
+                {"reason": "ingest", "race_id": race.id, "track_id": race.track_id},
+            )
         await repos.note_node(
             db,
             node_id=str(doc.get("node_id") or ""),

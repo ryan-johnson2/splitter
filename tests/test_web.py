@@ -642,6 +642,18 @@ async def test_desktop_install_has_no_web_only_switch(tmp_path: Any) -> None:
     ):
         html = (await c.get("/settings")).text
         assert 'name="web_mode"' not in html and 'id="game_host"' in html
+        # …and no "Web ↗" nav link: the webview cannot open a tab. The indicator stays.
+        await c.post(
+            "/settings",
+            data={
+                "upstream_url": "http://192.168.1.10:8100",
+                "upstream_token": "t",
+                "game_host": "192.168.1.50",
+            },
+            follow_redirects=False,
+        )
+        nav = (await c.get("/races")).text
+        assert "Web ↗" not in nav and 'id="web-dot"' in nav
         r = await c.post("/settings", data={"web_mode": "1"}, follow_redirects=False)
         assert r.status_code == 303 and not app.state.settings.get_bool("web_mode")
         assert (await c.get("/", follow_redirects=False)).status_code == 200

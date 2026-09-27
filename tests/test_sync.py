@@ -19,6 +19,7 @@ from tests.test_controller import fly
 async def test_a_run_is_pushed_and_acknowledged(web: Side, node: Side) -> None:
     ctl, up = node.state.controller, node.state.uploader
     assert up.configured and not up.token_blocked
+    web_pages = web.state.hub.subscribe()  # a Races page open on the web (d14)
     await ctl.handle_event(h.session())
     await fly(ctl, imu=True)
     assert up.pending == 1 and ctl.snapshot()["sync"]["pending"] == 1
@@ -29,6 +30,8 @@ async def test_a_run_is_pushed_and_acknowledged(web: Side, node: Side) -> None:
 
     await up.process_once()
     assert up.pending == 0 and up.last_error == "" and up.last_ack_at
+    # The web told its open pages: the Races page reloads on this.
+    assert any(m["type"] == "races" for m in h.drain(web_pages))
     async with web.state.session_factory() as db:
         got = (await db.execute(select(Race))).scalar_one()
         assert got.uuid == race.uuid and got.origin == "ingest" and got.received_at
