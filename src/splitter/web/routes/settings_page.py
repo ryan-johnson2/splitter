@@ -27,6 +27,9 @@ async def settings_page(request: Request) -> Any:
             # The node name's placeholder: what the uploader sends when it is blank.
             "hostname": socket.gethostname(),
             "local_addresses": netinfo.local_ipv4_addresses() if state.config.desktop else [],
+            # A local install (the desktop app, the service on the gaming PC) is the timer by
+            # definition: no web-only switch for it (#18).
+            "desktop": state.config.desktop,
             "time_formats": TIME_FORMATS,
             "bridge": state.bridge.status(),
             "controller": state.controller,
@@ -80,7 +83,7 @@ async def settings_save(
     state = request.app.state
     settings = state.settings
     values = {
-        "web_mode": "1" if web_mode == "1" else "0",
+        "web_mode": "1" if web_mode == "1" and not state.config.desktop else "0",
         "game_host": game_host.strip(),
         "game_port": str(game_port),
         "player_name": player_name.strip(),

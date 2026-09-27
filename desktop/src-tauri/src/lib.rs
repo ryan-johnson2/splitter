@@ -176,23 +176,79 @@ fn service_cli(action: &str) -> i32 {
             return 1;
         }
     };
-    let mut cmd = Command::new(&exe);
-    cmd.arg("service").arg(action);
+    if !exe.is_file() {
+        // Defender quarantining the freshly unpacked sidecar leaves exactly this.
+        log(format!("sidecar is not there after unpacking: {} — antivirus?", exe.display()));
+        return 1;
+    }
     if action == "install" {
         // Re-registering is the upgrade path: an older service would point at the
         // previous version's folder, which extract_sidecar just removed.
-        let _ = Command::new(&exe).arg("service").arg("remove").status();
+        run_logged(Command::new(&exe).args(["service", "remove"]), "service remove (before install)");
+        firewall_rule(&exe, true);
+    }
+    let mut cmd = Command::new(&exe);
+    cmd.arg("service").arg(action);
+    if action == "install" {
         cmd.arg("--exe").arg(&exe).arg("--data-dir").arg(&data_dir);
     }
-    match cmd.status() {
-        Ok(status) => {
-            log(format!("service {action}: {status}"));
-            status.code().unwrap_or(1)
+    let code = run_logged(&mut cmd, &format!("service {action}"));
+    if action == "remove" {
+        firewall_rule(&exe, false);
+    }
+    code
+}
+
+/// Run a command with no console, logging every line it prints and its exit status —
+/// the hooks run this shell headless, so this log is the only place `sc`'s words survive.
+fn run_logged(cmd: &mut Command, what: &str) -> i32 {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    match cmd.output() {
+        Ok(out) => {
+            for line in String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .chain(String::from_utf8_lossy(&out.stderr).lines())
+            {
+                if !line.trim().is_empty() {
+                    log(format!("[{what}] {}", line.trim_end()));
+                }
+            }
+            log(format!("{what}: {}", out.status));
+            out.status.code().unwrap_or(1)
         }
         Err(e) => {
-            log(format!("service {action} failed to run: {e}"));
+            log(format!("{what} failed to run: {e}"));
             1
         }
+    }
+}
+
+/// The inbound rule for the service's sidecar on 8100: a service gets no "allow access?"
+/// prompt, so without this the tablet on the LAN is silently blocked. Best effort.
+fn firewall_rule(exe: &Path, add: bool) {
+    #[cfg(windows)]
+    {
+        let mut cmd = Command::new("netsh");
+        cmd.args(["advfirewall", "firewall"]);
+        if add {
+            cmd.args(["delete", "rule", "name=Splitter"]);
+            run_logged(&mut cmd, "firewall (clear old rule)");
+            let mut cmd = Command::new("netsh");
+            cmd.args(["advfirewall", "firewall", "add", "rule", "name=Splitter", "dir=in", "action=allow", "protocol=TCP", "localport=8100"]);
+            cmd.arg(format!("program={}", exe.display()));
+            run_logged(&mut cmd, "firewall (allow 8100)");
+        } else {
+            cmd.args(["delete", "rule", "name=Splitter"]);
+            run_logged(&mut cmd, "firewall (remove rule)");
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (exe, add);
     }
 }
 

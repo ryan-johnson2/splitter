@@ -630,3 +630,50 @@ async def test_settings_save_on_change_answers_json(client: AsyncClient) -> None
     # The page carries the save-on-change script and the guarded cards' Apply buttons.
     page = (await client.get("/settings")).text
     assert 'id="settings-form"' in page and "X-Requested-With" in page and "data-apply" in page
+
+
+async def test_desktop_install_has_no_web_only_switch(tmp_path: Any) -> None:
+    """#18: a local install is the timer by definition — no role card, and web_mode is ignored."""
+    app = create_app(Config(database_url=f"sqlite+aiosqlite:///{tmp_path}/d.db", desktop=True))
+    app.state.catalog = _FakeCatalog()
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c,
+    ):
+        html = (await c.get("/settings")).text
+        assert 'name="web_mode"' not in html and 'id="game_host"' in html
+        r = await c.post("/settings", data={"web_mode": "1"}, follow_redirects=False)
+        assert r.status_code == 303 and not app.state.settings.get_bool("web_mode")
+        assert (await c.get("/", follow_redirects=False)).status_code == 200
+
+
+async def test_track_page_offers_to_assign_a_track_to_a_no_id_group(client: AsyncClient) -> None:
+    """The Tracks page is where an unknown track gets fixed, not only one race's Edit form."""
+    ctl = client.app.state.controller  # type: ignore[attr-defined]
+    # A run recorded with a name but no online id.
+    await ctl.set_manual_session(track_name="Mystery loop")
+    from tests.test_controller import fly_track
+
+    await fly_track(ctl, [2.0, 2.0, 2.0])
+    race_id = (await client.get("/api/races")).json()[0]["id"]
+    html = (await client.get("/tracks/detail", params={"track": "Mystery loop"})).text
+    assert 'id="assign-track"' in html and f'name="race_ids" value="{race_id}"' in html
+    assert 'action="/races/bulk"' in html and "/static/picker.js" in html
+    # Picking a track through it re-attributes the group (the same bulk route).
+    r = await client.post(
+        "/races/bulk",
+        data={
+            "race_ids": str(race_id),
+            "action": "update",
+            "track_id": "40001",
+            "scene_id": "16",
+            "track_source": "community",
+            "track_name": "USADT Champs Trial 01",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert (await client.get(f"/api/races/{race_id}")).json()["track_id"] == 40001
+    # A group that has an id shows no such card.
+    html = (await client.get("/tracks/detail", params={"track_id": 40001})).text
+    assert 'id="assign-track"' not in html

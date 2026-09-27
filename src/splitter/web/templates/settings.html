@@ -4,11 +4,13 @@
 <div class="page-head"><h1>Settings</h1><p class="sub">Changes save as you make them. The game address and the sending address wait for <b>Apply</b>, since they reconnect things.</p></div>
 
 <form method="post" action="/settings" class="stack" id="settings-form">
+{% if not desktop %}
 <div class="card" id="role">
   <h2>What this Splitter is</h2>
   <div class="field"><label class="switch"><input type="hidden" name="web_mode" value="0"><input type="checkbox" name="web_mode" value="1" {% if values.web_mode == "1" %}checked{% endif %}> Web only — keeps the runs other Splitters send, never connects to the game</label>
   <p class="help">On: the game link is not started at all, the Live page and the recording settings go away, and Races is home. Use it on the Splitter that keeps everything (the LXC or Docker one). Off: this is the timer next to the game.</p></div>
 </div>
+{% endif %}
 
 {% if values.web_mode != "1" %}
 <div class="card">
