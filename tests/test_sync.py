@@ -249,3 +249,25 @@ async def test_earlier_and_imported_runs_are_queued_too(web: Side, node: Side) -
     assert len(got) == 2
     # The imported run had no node: the importing install became its node.
     assert {r["node_id"] for r in got} == {node.state.settings.get("node_id")}
+
+
+async def test_an_untrusted_certificate_is_named_as_such(web: Side, node: Side) -> None:
+    """The gaming PC (2026-09-27): the service runs as LocalSystem, which does not see the
+    user's Trusted Root store, and the raw CryptoAPI sentence said nothing about that."""
+    from splitter.sync.uploader import _looks_like_untrusted_cert
+
+    assert _looks_like_untrusted_cert(
+        "ConnectError: A certificate chain processed, but terminated in a root certificate "
+        "which is not trusted by the trust provider."
+    )
+    assert _looks_like_untrusted_cert(
+        "ConnectError: certificate verify failed: self-signed certificate"
+    )
+    assert not _looks_like_untrusted_cert("ConnectError: [Errno 111] Connection refused")
+    up = node.state.uploader
+    up._web_failed(
+        "ConnectError: terminated in a root certificate which is not trusted by the trust provider."
+    )
+    assert up.web == "untrusted_cert"
+    assert "Trusted Root" in up.last_error and "splitter-ca.crt" in up.last_error
+    assert "certificate not trusted" in (await node.client.get("/settings")).text

@@ -46,7 +46,15 @@ IDLE_S = 60.0
 # ``Uploader.web``: the web's answer at last contact. ``unknown`` until the first
 # exchange (or after the settings change), then one of the rest. Anything but
 # ``ok`` paints the header indicator red with the reason.
-WEB_STATES = ("unknown", "ok", "receiving_off", "bad_token", "old_web", "unreachable")
+WEB_STATES = (
+    "unknown",
+    "ok",
+    "receiving_off",
+    "bad_token",
+    "old_web",
+    "untrusted_cert",
+    "unreachable",
+)
 
 
 def token_allowed(url: str) -> bool:
@@ -152,10 +160,27 @@ class Uploader:
             self.last_error = (
                 "HTTP 401: the web refused the token (copy it again from its Settings)"
             )
+        elif _looks_like_untrusted_cert(error):
+            # The OS trust store rejected the web's certificate chain. On the gaming PC
+            # Splitter runs as a service (LocalSystem), which does not see the user's own
+            # Trusted Root store — the home CA root has to be in the MACHINE store.
+            self.web = "untrusted_cert"
+            self.last_error = (
+                "the web's certificate is signed by a root this machine does not trust. "
+                "Install the CA root into the machine's Trusted Root store (Windows: "
+                "run certutil -addstore -f Root <root.crt> as administrator — the root is "
+                f"usually at {self._root_hint()}), or use the plain http:// LAN address"
+            )
         else:
             self.web = "unreachable"
             self.last_error = error
         self.web_checked_at = utcnow().replace(microsecond=0).isoformat() + "Z"
+
+    def _root_hint(self) -> str:
+        """Where the web serves its CA root (deploy/lxc/caddy: /splitter-ca.crt over http)."""
+        parts = urlsplit(self.url)
+        host = parts.hostname or ""
+        return f"http://{host}/splitter-ca.crt"
 
     def wake(self) -> None:
         self._wake.set()
@@ -441,6 +466,20 @@ class Uploader:
         )
         r.raise_for_status()
         return dict(r.json())
+
+
+def _looks_like_untrusted_cert(error: str) -> bool:
+    """Whether a transport error is the trust store refusing the web's certificate.
+    Windows CryptoAPI: "terminated in a root certificate which is not trusted";
+    OpenSSL: "certificate verify failed" / "unable to get local issuer certificate"."""
+    e = error.lower()
+    return (
+        "not trusted by the trust provider" in e
+        or "certificate verify failed" in e
+        or "unable to get local issuer certificate" in e
+        or "self-signed certificate" in e
+        or "self signed certificate" in e
+    )
 
 
 def _backoff(attempts: int) -> timedelta:

@@ -46,6 +46,7 @@
     else if (s.web === "receiving_off") paint("web-dot", "web-label", "", "not receiving");
     else if (s.web === "bad_token") paint("web-dot", "web-label", "", "bad token");
     else if (s.web === "old_web") paint("web-dot", "web-label", "", "web too old");
+    else if (s.web === "untrusted_cert") paint("web-dot", "web-label", "", "certificate not trusted");
     else if (s.web === "unreachable") paint("web-dot", "web-label", "", "unreachable");
     else if (s.terminal) paint("web-dot", "web-label", "", s.terminal + " refused");
     else if (s.pending) paint("web-dot", "web-label", s.last_error ? "" : "busy", s.pending + " pending");
@@ -116,6 +117,7 @@
       if (s.token_blocked) return { title: "Web: blocked", body: "The address" + where + " is plain <code>http://</code> to a public address, which would expose the token. Use <code>https://</code>, or a LAN address." };
       if (s.web === "receiving_off") return { title: "Web: not receiving", body: "The other Splitter" + where + " has <i>Receive runs</i> turned off, so nothing can be sent. Turn it on in its Settings; runs recorded meanwhile wait here." };
       if (s.web === "bad_token") return { title: "Web: bad token", body: "The other Splitter" + where + " refused the token. Copy it again from its Settings → <i>Receive runs</i> into <a href=\"/settings#send\">Settings</a> here." };
+      if (s.web === "untrusted_cert") return { title: "Web: certificate not trusted", body: "This machine does not trust the root that signed the other Splitter's certificate" + where + ". Splitter runs as a service, so the root must be in the <b>machine's</b> Trusted Root store (not just your user's): on Windows, as administrator, <code>certutil -addstore -f Root root.crt</code>. The other Splitter serves its root at <code>http://&lt;its host&gt;/splitter-ca.crt</code>. Or use its plain <code>http://</code> LAN address." + err };
       if (s.web === "old_web") return { title: "Web: too old", body: "The other Splitter" + where + " runs an older version that cannot read this node's runs. Upgrade it." + err };
       if (s.web === "unreachable") return { title: "Web: unreachable", body: "The other Splitter" + where + " did not answer. Runs wait here and go as soon as it can be reached." + err };
       var err = s.last_error ? '<p class="muted small">Last error: ' + esc(s.last_error) + "</p>" : "";
