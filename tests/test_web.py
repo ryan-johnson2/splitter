@@ -655,8 +655,20 @@ async def test_track_page_offers_to_assign_a_track_to_a_no_id_group(client: Asyn
     from tests.test_controller import fly_track
 
     await fly_track(ctl, [2.0, 2.0, 2.0])
-    race_id = (await client.get("/api/races")).json()[0]["id"]
-    html = (await client.get("/tracks/detail", params={"track": "Mystery loop"})).text
+    race = (await client.get("/api/races")).json()[0]
+    race_id = race["id"]
+    # The Tracks list links a group by its PB key plus the name (the name matters for id-less runs).
+    html = (
+        await client.get(
+            "/tracks/detail",
+            params={
+                "track_id": 0,
+                "quad_model": race.get("quad_model_id", 0),
+                "laps": race.get("race_laps", 0),
+                "track": "Mystery loop",
+            },
+        )
+    ).text
     assert 'id="assign-track"' in html and f'name="race_ids" value="{race_id}"' in html
     assert 'action="/races/bulk"' in html and "/static/picker.js" in html
     # Picking a track through it re-attributes the group (the same bulk route).
