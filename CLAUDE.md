@@ -256,8 +256,13 @@ required for a run to record.
   (`token_allowed`), else the status is `token_blocked`. `POST /api/sync/test
   |flush|purge|retry`, `GET /api/sync`. Settings page section *Send runs to
   another Splitter*; header indicator *Web* (`#web-dot`, help key `sync`),
-  painted from `snapshot.sync` and `sync` messages; nav gains *Web ↗* and drops
-  Races/Tracks only when local copies are not kept. The picker proxies through
+  painted from `snapshot.sync` and `sync` messages **by what the web last
+  said** (`Uploader.web`: `unknown` / `ok` / `receiving_off` (403) /
+  `bad_token` (401) / `old_web` / `unreachable`), never by "nothing pending" —
+  an idle pass pings `/api/ingest/ping` (every `IDLE_S`, and at once after a
+  settings change), so a node with no runs still learns that receiving is off
+  on the web; nav gains *Web ↗* and drops Races/Tracks only when local copies
+  are not kept. The picker proxies through
   the web when no private client is installed here.
 - **Reference bundle** (`sync/bundle.py`): the PB for a `PBKey` (crossings,
   laps, `race_uuid`) plus `repos.track_geometry` for the track, cached per key

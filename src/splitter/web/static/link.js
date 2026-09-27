@@ -41,9 +41,16 @@
     if (!s) { paint("web-dot", "web-label", "unk", "unknown"); return; }
     if (!s.upstream) paint("web-dot", "web-label", "unk", "off");
     else if (s.token_blocked) paint("web-dot", "web-label", "", "blocked");
+    // What the web itself said last: these come before the queue counts, because a
+    // queue of zero says nothing about the web (nothing was ever sent).
+    else if (s.web === "receiving_off") paint("web-dot", "web-label", "", "not receiving");
+    else if (s.web === "bad_token") paint("web-dot", "web-label", "", "bad token");
+    else if (s.web === "old_web") paint("web-dot", "web-label", "", "web too old");
+    else if (s.web === "unreachable") paint("web-dot", "web-label", "", "unreachable");
     else if (s.terminal) paint("web-dot", "web-label", "", s.terminal + " refused");
     else if (s.pending) paint("web-dot", "web-label", s.last_error ? "" : "busy", s.pending + " pending");
-    else paint("web-dot", "web-label", "on", "sent");
+    else if (s.web !== "ok") paint("web-dot", "web-label", "busy", "checking…");
+    else paint("web-dot", "web-label", "on", "up to date");
   }
   function emit(type, data) {
     (listeners[type] || []).forEach(function (fn) { try { fn(data); } catch (e) { console.error("link listener failed", type, e); } });
@@ -107,9 +114,14 @@
       var where = s.url ? ' at <code>' + esc(s.url) + '</code>' : "";
       if (!s.upstream) return { title: "Web: off", body: "This Splitter is not sending its runs anywhere. Set it up under <a href=\"/settings#send\">Settings</a>." };
       if (s.token_blocked) return { title: "Web: blocked", body: "The address" + where + " is plain <code>http://</code> to a public address, which would expose the token. Use <code>https://</code>, or a LAN address." };
+      if (s.web === "receiving_off") return { title: "Web: not receiving", body: "The other Splitter" + where + " has <i>Receive runs</i> turned off, so nothing can be sent. Turn it on in its Settings; runs recorded meanwhile wait here." };
+      if (s.web === "bad_token") return { title: "Web: bad token", body: "The other Splitter" + where + " refused the token. Copy it again from its Settings → <i>Receive runs</i> into <a href=\"/settings#send\">Settings</a> here." };
+      if (s.web === "old_web") return { title: "Web: too old", body: "The other Splitter" + where + " runs an older version that cannot read this node's runs. Upgrade it." + err };
+      if (s.web === "unreachable") return { title: "Web: unreachable", body: "The other Splitter" + where + " did not answer. Runs wait here and go as soon as it can be reached." + err };
       var err = s.last_error ? '<p class="muted small">Last error: ' + esc(s.last_error) + "</p>" : "";
       if (s.terminal) return { title: "Web: runs refused", body: s.terminal + " run" + (s.terminal === 1 ? "" : "s") + " will not be sent" + where + ": the other Splitter refused them (older version, or the run was deleted there). See <a href=\"/settings#send\">Settings</a>." + err };
       if (s.pending) return { title: "Web: " + s.pending + " pending", body: "Runs waiting to be sent" + where + ". They go as soon as it can be reached; nothing is lost meanwhile." + err };
+      if (s.web !== "ok") return { title: "Web: checking", body: "Asking the other Splitter" + where + " how it is. This takes a moment." };
       return { title: "Web: up to date", body: "Every run has been sent" + where + "." + (s.keep_local ? "" : " Local copies are deleted once sent.") };
     },
     noid: function () { return { title: "No online track id", body: "This run's track has no online id, so it cannot be a personal best and has no reference. Pick the track with <b>Track…</b>, or fix it later on the Races page." }; }

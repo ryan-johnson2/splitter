@@ -40,6 +40,11 @@ BACKOFF_MIN_S = 5.0
 BACKOFF_MAX_S = 300.0
 IDLE_S = 60.0
 
+# ``Uploader.web``: the web's answer at last contact. ``unknown`` until the first
+# exchange (or after the settings change), then one of the rest. Anything but
+# ``ok`` paints the header indicator red with the reason.
+WEB_STATES = ("unknown", "ok", "receiving_off", "bad_token", "old_web", "unreachable")
+
 
 def token_allowed(url: str) -> bool:
     """Only send the token over https, or over http to a private/LAN address."""
@@ -85,6 +90,12 @@ class Uploader:
         self.terminal = 0
         self.last_error = ""
         self.last_ack_at: str | None = None
+        # What the web said the last time we spoke to it (``WEB_STATES``). The
+        # header's *Web* indicator is painted from this, not from "nothing is
+        # pending": a node with no runs to send never used to contact the web
+        # at all, so its indicator read green while the web had receiving off.
+        self.web = "unknown"
+        self.web_checked_at: str | None = None
 
     # ── configuration / status ─────────────────────────────────────
 
@@ -110,7 +121,30 @@ class Uploader:
             "last_error": self.last_error,
             "token_blocked": self.token_blocked,
             "keep_local": self._settings.get_bool("keep_local_runs"),
+            "web": self.web,
+            "web_checked_at": self.web_checked_at,
         }
+
+    # ── what the web said ──────────────────────────────────────────
+
+    def _web_ok(self) -> None:
+        self.web = "ok"
+        self.last_error = ""
+        self.web_checked_at = utcnow().replace(microsecond=0).isoformat() + "Z"
+
+    def _web_failed(self, error: str, status: int | None = None) -> None:
+        """Record a failed exchange. 401/403 are the web's own answers (bad token,
+        receiving off); anything else means it could not be reached or is broken."""
+        if status == 403:
+            self.web = "receiving_off"
+            self.last_error = "HTTP 403: the web is not receiving runs (turn it on in its Settings)"
+        elif status == 401:
+            self.web = "bad_token"
+            self.last_error = "HTTP 401: the web refused the token (copy it again from its Settings)"
+        else:
+            self.web = "unreachable"
+            self.last_error = error
+        self.web_checked_at = utcnow().replace(microsecond=0).isoformat() + "Z"
 
     def wake(self) -> None:
         self._wake.set()
@@ -121,6 +155,8 @@ class Uploader:
             await self._client.aclose()
             self._client = None
         self.last_error = ""
+        self.web = "unknown"
+        self.web_checked_at = None
         async with self._sf() as db:
             await repos.reset_outbox_backoff(db)
         if self.configured:
@@ -228,6 +264,11 @@ class Uploader:
             due = await repos.due_outbox(db, now)
         for row_uuid in due:
             await self._upload(row_uuid)
+        if not due:
+            # Nothing to push, so nothing would have told us how the web is.
+            # Ask it: one small GET per idle pass (every IDLE_S, and at once
+            # after the settings change) keeps the indicator honest.
+            await self.check()
         await self.refresh_counts()
         async with self._sf() as db:
             next_at = await repos.next_outbox_at(db)
@@ -255,7 +296,7 @@ class Uploader:
             body = r.json()
             async with self._sf() as db:
                 await repos.finish_outbox(db, race_uuid, acked=True)
-            self.last_error = ""
+            self._web_ok()
             log.info("run %s pushed to %s (%s)", race_uuid[:8], self.url, body.get("status"))
             if body.get("reference"):
                 await self.apply_bundle(body["reference"])
@@ -273,12 +314,12 @@ class Uploader:
         elif r.status_code == 422:
             await self._terminal(race_uuid, "rejected", detail)
         else:
-            await self._fail(race_uuid, f"HTTP {r.status_code}: {detail}")
+            await self._fail(race_uuid, f"HTTP {r.status_code}: {detail}", r.status_code)
 
-    async def _fail(self, race_uuid: str, error: str) -> None:
+    async def _fail(self, race_uuid: str, error: str, status: int | None = None) -> None:
         async with self._sf() as db:
             attempts = await repos.fail_outbox(db, race_uuid, error, _backoff)
-        self.last_error = error
+        self._web_failed(error, status)
         log.warning("push of %s failed (attempt %d): %s", race_uuid[:8], attempts, error)
         self._broadcast()
 
@@ -303,13 +344,14 @@ class Uploader:
                 headers=self._headers(),
             )
         except httpx.HTTPError as e:
-            self.last_error = f"{type(e).__name__}: {e}"
+            self._web_failed(f"{type(e).__name__}: {e}")
             self._broadcast()
             return None
         if r.status_code != 200:
-            self.last_error = f"HTTP {r.status_code}: {_detail(r)}"
+            self._web_failed(f"HTTP {r.status_code}: {_detail(r)}", r.status_code)
             self._broadcast()
             return None
+        self._web_ok()
         payload = r.json()
         await self.apply_bundle(payload)
         return dict(payload)
@@ -329,6 +371,8 @@ class Uploader:
     # ── one-off actions from the Settings page ─────────────────────
 
     async def ping(self) -> dict[str, Any]:
+        """*Test connection*: ask the web who it is. Also the heartbeat behind the
+        header indicator (:meth:`check`), so every outcome updates ``web``."""
         if not self.configured:
             return {"ok": False, "error": "no upstream configured"}
         if self.token_blocked:
@@ -336,21 +380,37 @@ class Uploader:
         try:
             r = await self._http().get("/api/ingest/ping", headers=self._headers())
         except httpx.HTTPError as e:
-            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+            self._web_failed(f"{type(e).__name__}: {e}")
+            self._broadcast()
+            return {"ok": False, "error": self.last_error}
         if r.status_code != 200:
-            return {"ok": False, "error": f"HTTP {r.status_code}: {_detail(r)}"}
+            self._web_failed(f"HTTP {r.status_code}: {_detail(r)}", r.status_code)
+            self._broadcast()
+            return {"ok": False, "error": self.last_error}
         body = r.json()
         ok = int(body.get("doc_version", 0)) >= DOC_VERSION
+        if ok:
+            self._web_ok()
+        else:
+            self.web = "old_web"
+            self.last_error = (
+                f"the web understands document version {body.get('doc_version')}; "
+                f"this node writes {DOC_VERSION}. Upgrade the web."
+            )
+            self.web_checked_at = utcnow().replace(microsecond=0).isoformat() + "Z"
+        self._broadcast()
         return {
             "ok": ok,
             "version": body.get("version"),
             "doc_version": body.get("doc_version"),
             "name": body.get("name", ""),
-            "error": ""
-            if ok
-            else f"the web understands document version "
-            f"{body.get('doc_version')}; this node writes {DOC_VERSION}. Upgrade the web.",
+            "error": "" if ok else self.last_error,
         }
+
+    async def check(self) -> None:
+        """The idle heartbeat: a ping whose result only goes to ``web``."""
+        if self.configured and not self.token_blocked:
+            await self.ping()
 
     async def purge(self) -> int:
         """Delete every local run the web has acknowledged."""

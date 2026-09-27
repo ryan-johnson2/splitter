@@ -176,6 +176,40 @@ async def test_ping_and_the_token_guard(web: Side, node: Side) -> None:
     assert "blocked" in (await node.client.get("/settings")).text
 
 
+async def test_the_web_indicator_says_what_the_web_said(web: Side, node: Side) -> None:
+    """A node with nothing to send used to read green while the web had receiving
+    off: the indicator was painted from the empty queue. Now an idle pass asks."""
+    up = node.state.uploader
+    assert up.web == "unknown" and up.status()["web"] == "unknown"
+    await up.process_once()  # nothing due → the heartbeat
+    assert up.web == "ok" and up.last_error == "" and up.web_checked_at
+    # The web turns receiving off: the next idle pass finds out, with the reason.
+    await web.client.post("/settings/ingest-token", data={"action": "disable"})
+    await up.process_once()
+    assert up.web == "receiving_off" and "not receiving" in up.last_error
+    assert (await node.client.get("/api/sync")).json()["web"] == "receiving_off"
+    assert "not receiving" in (await node.client.get("/settings")).text
+    # A run recorded meanwhile stays queued (403 is not terminal) and the reason holds.
+    ctl = node.state.controller
+    await ctl.handle_event(h.session())
+    await fly(ctl)
+    await up.process_once()
+    assert up.pending == 1 and up.terminal == 0 and up.web == "receiving_off"
+    # Back on with a new token: the old token is now wrong, and the node says so…
+    await web.client.post("/settings/ingest-token", data={"action": "generate"})
+    await up.process_once()
+    assert up.web == "bad_token" and up.pending == 1
+    # …until it is given the new one, after which the run goes and all is well.
+    await configure(node.client, url=WEB_URL, token=web.state.settings.get("ingest_token"))
+    assert up.web == "unknown"  # a settings change forgets what it knew
+    await up.process_once()
+    assert up.web == "ok" and up.pending == 0 and up.last_error == ""
+    # Test connection reports the same states.
+    await web.client.post("/settings/ingest-token", data={"action": "disable"})
+    r = (await node.client.post("/api/sync/test")).json()
+    assert not r["ok"] and "not receiving" in r["error"] and up.web == "receiving_off"
+
+
 async def test_ingest_requires_the_token(web: Side, node: Side) -> None:
     r = await web.client.get("/api/ingest/ping")
     assert r.status_code == 401
