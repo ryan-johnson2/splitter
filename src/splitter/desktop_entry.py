@@ -90,6 +90,15 @@ def _watch_parent(pid: int) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    args_in = sys.argv[1:] if argv is None else argv
+    if args_in[:1] == ["service"]:
+        # `splitter-sidecar service install|remove|… [--dry-run]`: the frozen build
+        # is the only Python on an installed PC, so the service registration
+        # (splitter/service.py) is reachable through it. The shell's
+        # --install-service / --remove-service modes call this.
+        from splitter.service import main as service_main
+
+        sys.exit(service_main(args_in[1:]))
     p = argparse.ArgumentParser(prog="splitter-sidecar")
     p.add_argument("--data-dir", default=os.environ.get("SPLITTER_DATA_DIR", ""))
     p.add_argument("--host", default="0.0.0.0")
@@ -100,7 +109,7 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="run as a Windows service (started by the Service Control Manager)",
     )
-    args = p.parse_args(argv)
+    args = p.parse_args(args_in)
     if args.service:
         return _run_as_windows_service(args)
     if args.parent_pid:

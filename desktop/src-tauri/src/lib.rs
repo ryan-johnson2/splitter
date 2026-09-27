@@ -85,6 +85,15 @@ impl Sidecar {
 }
 
 pub fn run() {
+    // Headless modes for the installer (NSIS hooks, `nsis/hooks.nsh`): no window, no
+    // Tauri, exit code only. Everything they say goes to the service data dir's log.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        Some("--install-service") => std::process::exit(service_cli("install")),
+        Some("--remove-service") => std::process::exit(service_cli("remove")),
+        _ => {}
+    }
+
     tauri::Builder::default()
         .setup(|app| {
             let handle = app.handle().clone();
@@ -142,6 +151,49 @@ pub fn run() {
                 }
             }
         });
+}
+
+/// `--install-service` / `--remove-service` (the installer's hooks, run elevated): unpack the
+/// embedded sidecar into the **service** data dir and register it as the Windows service
+/// (`splitter-sidecar service install`, which stops and deletes an older registration
+/// first so an update re-points the service at the new sidecar), or remove it. Returns
+/// the exit code for the hook.
+fn service_cli(action: &str) -> i32 {
+    let Some(data_dir) = service_data_dir() else {
+        eprintln!("splitter-desktop: no service data dir on this platform");
+        return 2;
+    };
+    if fs::create_dir_all(&data_dir).is_err() {
+        eprintln!("splitter-desktop: cannot create {}", data_dir.display());
+        return 2;
+    }
+    open_log(&data_dir);
+    log(format!("{action} service — data dir {}", data_dir.display()));
+    let exe = match extract_sidecar(&data_dir) {
+        Ok(exe) => exe,
+        Err(e) => {
+            log(format!("cannot unpack the sidecar: {e}"));
+            return 1;
+        }
+    };
+    let mut cmd = Command::new(&exe);
+    cmd.arg("service").arg(action);
+    if action == "install" {
+        // Re-registering is the upgrade path: an older service would point at the
+        // previous version's folder, which extract_sidecar just removed.
+        let _ = Command::new(&exe).arg("service").arg("remove").status();
+        cmd.arg("--exe").arg(&exe).arg("--data-dir").arg(&data_dir);
+    }
+    match cmd.status() {
+        Ok(status) => {
+            log(format!("service {action}: {status}"));
+            status.code().unwrap_or(1)
+        }
+        Err(e) => {
+            log(format!("service {action} failed to run: {e}"));
+            1
+        }
+    }
 }
 
 /// Where a system-service install keeps its state — the same answer as

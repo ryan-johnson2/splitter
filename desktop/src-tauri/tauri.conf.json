@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Splitter",
-  "version": "0.5.2",
+  "version": "0.9.0",
   "identifier": "fpv.splitter.desktop",
   "build": {
     "frontendDist": "../placeholder-dist"
@@ -14,8 +14,10 @@
     }
   },
   "bundle": {
-    "active": false,
-    "targets": [],
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -24,7 +26,14 @@
       "icons/icon.ico"
     ],
     "category": "Utility",
-    "shortDescription": "Splitter — VelociDrone lap timer, native desktop app.",
-    "longDescription": "Runs the embedded Splitter server (a PyInstaller sidecar) with a portable data folder beside the executable and opens the live page in a window. Also reachable from a tablet on the LAN on port 8100."
+    "shortDescription": "Splitter \u2014 VelociDrone lap timer, native desktop app.",
+    "longDescription": "Runs the embedded Splitter server (a PyInstaller sidecar) with a portable data folder beside the executable and opens the live page in a window. Also reachable from a tablet on the LAN on port 8100.",
+    "windows": {
+      "nsis": {
+        "installerHooks": "./nsis/hooks.nsh",
+        "installMode": "perMachine",
+        "displayLanguageSelector": false
+      }
+    }
   }
 }
