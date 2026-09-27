@@ -398,6 +398,11 @@ after this works self-hosted.
   and phase 3 is when it starts to matter.
 - **Out of scope for this branch.** Accounts, hosting, billing, the relay.
   The branch lands phase 1 and is cut per phase after that.
+- **Later: https from Splitter itself (#21).** A node on `http://<lan-ip>:8100`
+  cannot be installed as a PWA from a phone (secure context). Settings would
+  grow a TLS block: off, a custom certificate and key handed to uvicorn, then
+  ACME against Let's Encrypt or an internal CA. Documented in the issue, not
+  built; the LXC keeps Caddy in front.
 
 ## Next session on the gaming PC (Windows)
 
