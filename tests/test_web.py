@@ -733,3 +733,43 @@ async def test_web_mode_always_receives_and_has_no_install_name(tmp_path: Any) -
         r = await c.post("/settings", data={"web_mode": "0"}, follow_redirects=False)
         page = (await c.get("/settings")).text
         assert "Turn receiving off" in page and 'name="node_name"' in page
+
+
+async def test_tracks_merge_by_id_with_a_pb_per_quad(client: AsyncClient) -> None:
+    """The same track on two quads is one row on Tracks with a PB per quad, and
+    the track page covers both quads until one is picked."""
+    controller = client.app.state.controller  # type: ignore[attr-defined]
+
+    async def fly(quad: str, scale: float) -> None:
+        await controller.handle_event(h.session(quad=quad))
+        await controller.handle_event(h.status("start"))
+        await controller.handle_event(h.countdown(0))
+        for lap, gate, t, fin in h.two_lap_race(scale=scale):
+            await controller.handle_event(h.racedata(lap, gate, t, fin))
+        await controller.handle_event(h.status("race finished"))
+
+    await fly("LightSwitch", 1.0)  # catalog model 108
+    await fly("LightSwitch", 1.2)
+    await fly("AOS 5.5", 1.5)  # catalog model 89: a PB of its own
+    races = (await client.get("/api/races")).json()
+    assert sorted(r["quad_model_id"] for r in races) == [89, 108, 108]
+    assert sum(1 for r in races if r["is_best"]) == 2  # one PB per quad
+
+    page = (await client.get("/tracks")).text
+    assert page.count("/tracks/detail?track_id=500") == 1  # one row, not one per quad
+    assert "LightSwitch, AOS 5.5" in page or "AOS 5.5, LightSwitch" in page
+    assert page.count("/races/") == 2  # a PB link per quad
+
+    # The track page: every quad, a PB-by-quad table, the runs against their own quad's PB.
+    html = (await client.get("/tracks/detail?track_id=500")).text
+    assert 'id="pb-by-quad"' in html and 'id="track-filters"' in html
+    assert "3 finished of 3 runs" in html and "all quads" in html
+    assert html.count('<span class="pill accent">PB</span>') == 2
+    # Narrowed to one quad: only its runs, no PB for the other.
+    html = (await client.get("/tracks/detail?track_id=500&quad_model=89&laps=3")).text
+    assert "1 finished of 1 runs" in html and "(3 on the track)" in html
+    assert "AOS 5.5 · 3 laps" in html
+    assert html.count('<span class="pill accent">PB</span>') == 1
+    # A quad nobody flew: an empty page, not an error.
+    r = await client.get("/tracks/detail?track_id=500&quad_model=1&laps=3")
+    assert r.status_code == 200 and "0 finished of 0 runs" in r.text

@@ -470,8 +470,12 @@ loopback); newest client wins the feed. Full spec:
 ## Pages
 
 `/` live (tablet), `/races` + `/races/{id}` (laps, gates vs PB, flight path,
-speed chart, edit/delete, bulk edit), `/tracks` + `/tracks/detail` (PB,
-progression chart, gate consistency, theoretical best), `/settings`,
+speed chart, edit/delete, bulk edit), `/tracks` (**one row per track id**,
+`repos.group_tracks` over the per-key summaries, PB per quad in the row) +
+`/tracks/detail?track_id=` (every quad on the track: *PB by quad* table, quad /
+laps chips narrow the analysis, `laps` defaults to the most flown, runs are
+compared with the PB of their own quad and length; PBs themselves stay per
+`PBKey`), `/settings`,
 `/protocol` (raw frames). JSON: `/api/state`, `/api/session`,
 `/api/connection`, `/api/races[/{id}]`, `/healthz`.
 

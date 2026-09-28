@@ -292,9 +292,78 @@ async def track_summaries(session: AsyncSession) -> list[TrackSummary]:
     return out
 
 
+@dataclass
+class TrackGroup:
+    """One track as the Tracks page lists it: every PB key (quad and race length)
+    it has runs for. Id-less legacy runs group by name."""
+
+    track_id: int
+    track_name: str
+    scenery: str
+    keys: list[TrackSummary]
+
+    @property
+    def runs(self) -> int:
+        return sum(k.runs for k in self.keys)
+
+    @property
+    def finished(self) -> int:
+        return sum(k.finished for k in self.keys)
+
+    @property
+    def last_run_at(self) -> datetime | None:
+        stamps = [k.last_run_at for k in self.keys if k.last_run_at is not None]
+        return max(stamps) if stamps else None
+
+    @property
+    def quads(self) -> list[str]:
+        out: list[str] = []
+        for k in self.keys:
+            name = k.quad_type or "unknown quad"
+            if name not in out:
+                out.append(name)
+        return out
+
+    @property
+    def laps(self) -> list[int]:
+        return sorted({k.race_laps for k in self.keys})
+
+    @property
+    def best_lap_ms(self) -> int | None:
+        laps = [k.best_lap_ms for k in self.keys if k.best_lap_ms is not None]
+        return min(laps) if laps else None
+
+
+def group_tracks(summaries: Sequence[TrackSummary]) -> list[TrackGroup]:
+    """Fold per-key summaries into one group per track id (per name for id 0),
+    keeping the summaries' order (newest run first) for the groups and sorting
+    the keys within a group by quad, then race length."""
+    groups: dict[tuple[int, str], TrackGroup] = {}
+    for s in summaries:
+        gk = (s.track_id, s.track_name if s.track_id == 0 else "")
+        g = groups.get(gk)
+        if g is None:
+            g = groups[gk] = TrackGroup(s.track_id, s.track_name, s.scenery, [])
+        g.keys.append(s)
+        g.scenery = g.scenery or s.scenery
+    for g in groups.values():
+        g.keys.sort(key=lambda k: (k.quad_type.lower(), k.race_laps))
+    return list(groups.values())
+
+
 async def races_for_key(session: AsyncSession, key: PBKey) -> list[Race]:
     stmt = select(Race).where(_key_filter(key)).order_by(Race.id.asc())
     return list((await session.execute(stmt)).scalars().all())
+
+
+async def races_for_track(session: AsyncSession, track_id: int, track_name: str = "") -> list[Race]:
+    """Every run on a track, oldest first, whatever the quad or race length.
+    Without an id the name is the identity (legacy runs)."""
+    stmt = select(Race).where(Race.track_id == track_id)
+    if track_id <= 0:
+        stmt = stmt.where(Race.track_name == track_name)
+    rows = await session.execute(stmt.order_by(Race.id.asc()))
+    return list(rows.scalars().all())
 
 
 async def telemetry_for_race(session: AsyncSession, race_id: int) -> list[Sample]:

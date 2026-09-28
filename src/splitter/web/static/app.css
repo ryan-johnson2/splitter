@@ -337,3 +337,7 @@ button.ind:hover .ind-name { text-decoration:underline dotted; }
   .live-actions .ico { font-size:1.1em; }
 }
 @media (max-width:760px) { .live-actions { margin-left:0; width:100%; } }
+.filter-chips { display:flex; flex-wrap:wrap; gap:.35rem; align-items:center; margin:-.4rem 0 1rem; }
+.filter-chips > span { margin-right:.2rem; }
+.filter-chips > span + span, .filter-chips .btn + span { margin-left:.6rem; }
+.pb-list div + div { margin-top:.15rem; }

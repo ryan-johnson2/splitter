@@ -1,20 +1,20 @@
 {% extends "base.html" %}
 {% block title %}{{ brand_name }} · Tracks{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Tracks</h1><p class="sub">One row per online track id, quad and race length — the combination a personal best is kept for. Runs without a track id are listed but never count as PBs.</p></div>
+<div class="page-head"><h1>Tracks</h1><p class="sub">One row per online track. A personal best is kept per quad and race length, so a track flown on two quads has two. Runs without a track id are listed but never count as PBs.</p></div>
 <div class="card">
-  {% if not summaries %}<p class="empty">Nothing recorded yet.</p>{% else %}
+  {% if not groups %}<p class="empty">Nothing recorded yet.</p>{% else %}
   <table class="stack">
-    <tr><th>Track</th><th>Quad</th><th class="num">Laps</th><th class="num">Runs</th><th class="num">PB</th><th class="num">Best lap</th><th>Last flown</th></tr>
-    {% for s in summaries %}
+    <tr><th>Track</th><th>Quads</th><th class="num">Laps</th><th class="num">Runs</th><th class="num">PB by quad</th><th class="num">Best lap</th><th>Last flown</th></tr>
+    {% for g in groups %}
     <tr>
-      <td><a href="/tracks/detail?track_id={{ s.track_id }}&quad_model={{ s.quad_model_id }}&laps={{ s.race_laps }}&track={{ s.track_name | urlencode }}">{{ s.track_name or "Unknown track" }}</a>{% if s.scenery %} <span class="muted small">{{ s.scenery }}</span>{% endif %}{% if s.track_id %} <span class="muted small">#{{ s.track_id }}</span>{% else %} <span class="pill bad small">no id</span>{% endif %}</td>
-      <td data-label="Quad">{{ s.quad_type or "—" }}</td>
-      <td data-label="Laps" class="num">{{ s.race_laps or "?" }}</td>
-      <td data-label="Runs" class="num">{{ s.finished }}<span class="muted">/{{ s.runs }}</span></td>
-      <td data-label="PB" class="num">{% if s.best_race_id %}<a href="/races/{{ s.best_race_id }}">{{ format_ms(s.best_ms) }}</a>{% else %}--{% endif %}</td>
-      <td data-label="Best lap" class="num">{{ format_ms(s.best_lap_ms) }}</td>
-      <td data-label="Last flown" class="muted"><time datetime="{{ utc_iso(s.last_run_at) }}">{{ s.last_run_at }}</time></td>
+      <td><a href="/tracks/detail?track_id={{ g.track_id }}{% if not g.track_id %}&track={{ g.track_name | urlencode }}{% endif %}">{{ g.track_name or "Unknown track" }}</a>{% if g.scenery %} <span class="muted small">{{ g.scenery }}</span>{% endif %}{% if g.track_id %} <span class="muted small">#{{ g.track_id }}</span>{% else %} <span class="pill bad small">no id</span>{% endif %}</td>
+      <td data-label="Quads">{{ g.quads | join(", ") }}</td>
+      <td data-label="Laps" class="num">{% for l in g.laps %}{% if not loop.first %} / {% endif %}{{ l or "?" }}{% endfor %}</td>
+      <td data-label="Runs" class="num">{{ g.finished }}<span class="muted">/{{ g.runs }}</span></td>
+      <td data-label="PB by quad" class="num pb-list">{% for k in g.keys %}<div>{% if k.best_race_id %}<a href="/races/{{ k.best_race_id }}">{{ format_ms(k.best_ms) }}</a>{% else %}--{% endif %}{% if g.keys | length > 1 %} <span class="muted small">{{ k.quad_type or "unknown quad" }}{% if g.laps | length > 1 %} · {{ k.race_laps or "?" }} laps{% endif %}</span>{% endif %}</div>{% endfor %}</td>
+      <td data-label="Best lap" class="num">{{ format_ms(g.best_lap_ms) }}</td>
+      <td data-label="Last flown" class="muted"><time datetime="{{ utc_iso(g.last_run_at) }}">{{ g.last_run_at }}</time></td>
     </tr>
     {% endfor %}
   </table>

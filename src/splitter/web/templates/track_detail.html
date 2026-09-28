@@ -2,7 +2,18 @@
 {% block title %}{{ brand_name }} · {{ track }}{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-<div class="page-head"><h1>{{ track or "Unknown track" }}</h1><p class="sub">{{ quad or "any quad" }} · {{ laps or "?" }} laps · {{ finished_count }} finished of {{ races | length }} runs{% if track_id %} · <span class="muted">track #{{ track_id }}</span>{% else %} · <span class="pill bad small">no online id — no PBs</span>{% endif %}</p></div>
+<div class="page-head"><h1>{{ track or "Unknown track" }}</h1><p class="sub">{{ quad or "all quads" }} · {{ laps or "?" }} laps · {{ finished_count }} finished of {{ races | length }} runs{% if all_runs != races | length %} <span class="muted">({{ all_runs }} on the track)</span>{% endif %}{% if track_id %} · <span class="muted">track #{{ track_id }}</span>{% else %} · <span class="pill bad small">no online id — no PBs</span>{% endif %}</p></div>
+
+{% set base = "/tracks/detail?track_id=" ~ track_id ~ ("&track=" ~ (track_query | urlencode) if track_query else "") %}
+{% if quad_options | length > 1 or laps_options | length > 1 %}
+<div class="filter-chips" id="track-filters">
+  {% if quad_options | length > 1 %}<span class="muted small">Quad</span>
+  <a class="btn sm {{ 'primary' if quad_model is none }}" href="{{ base }}&laps={{ laps }}">All</a>
+  {% for qid, qname in quad_options %}<a class="btn sm {{ 'primary' if qid == quad_model }}" href="{{ base }}&quad_model={{ qid }}&laps={{ laps }}">{{ qname or "unknown quad" }}</a>{% endfor %}{% endif %}
+  {% if laps_options | length > 1 %}<span class="muted small">Laps</span>
+  {% for l in laps_options %}<a class="btn sm {{ 'primary' if l == laps }}" href="{{ base }}{% if quad_model is not none %}&quad_model={{ quad_model }}{% endif %}&laps={{ l }}">{{ l or "?" }}</a>{% endfor %}{% endif %}
+</div>
+{% endif %}
 
 {% if not track_id and races %}
 <div class="card" id="assign-track">
@@ -27,10 +38,29 @@
 {% endif %}
 
 <div class="grid">
-  <div class="card kv">Personal best<b class="big">{% if best %}<a href="/races/{{ best.id }}">{{ format_ms(best.total_time_ms) }}</a>{% else %}--{% endif %}</b>{% if best %}<time datetime="{{ utc_iso(best.started_at) }}">{{ best.started_at }}</time>{% endif %}</div>
+  <div class="card kv">Personal best<b class="big">{% if best %}<a href="/races/{{ best.id }}">{{ format_ms(best.total_time_ms) }}</a>{% else %}--{% endif %}</b>{% if best %}<time datetime="{{ utc_iso(best.started_at) }}">{{ best.started_at }}</time>{% if quad_model is none and quad_options | length > 1 %}<span class="muted small">{{ best_quad or "unknown quad" }}</span>{% endif %}{% endif %}</div>
   <div class="card kv">Best lap<b>{{ format_ms(best_lap) }}</b></div>
   <div class="card kv">Theoretical best<b>{{ format_ms(theoretical) }}</b>{% if theoretical and best %}<span class="{{ delta_class(theoretical - best.total_time_ms) }}">{{ format_delta(theoretical - best.total_time_ms) }} vs PB</span> · fastest segment at every gate across {{ comparable }} runs{% endif %}</div>
 </div>
+
+{% if pbs | length > 1 %}
+<div class="card" id="pb-by-quad">
+  <div class="card-head"><h2>PB by quad</h2><span class="muted small">a personal best is kept per quad and race length · tap one to see just those runs</span></div>
+  <table class="stack">
+    <tr><th>Quad</th><th class="num">Laps</th><th class="num">Runs</th><th class="num">PB</th><th class="num">Best lap</th><th></th></tr>
+    {% for p in pbs %}
+    <tr class="{% if p.quad_model_id == quad_model and p.race_laps == laps %}best{% endif %}">
+      <td><a href="{{ base }}&quad_model={{ p.quad_model_id }}&laps={{ p.race_laps }}">{{ p.quad_type or "unknown quad" }}</a></td>
+      <td data-label="Laps" class="num">{{ p.race_laps or "?" }}</td>
+      <td data-label="Runs" class="num">{{ p.finished }}<span class="muted">/{{ p.runs }}</span></td>
+      <td data-label="PB" class="num">{% if p.best %}<a href="/races/{{ p.best.id }}">{{ format_ms(p.best.total_time_ms) }}</a>{% else %}--{% endif %}</td>
+      <td data-label="Best lap" class="num">{{ format_ms(p.best_lap_ms) }}</td>
+      <td>{% if p.best %}<time datetime="{{ utc_iso(p.best.started_at) }}" class="muted small">{{ p.best.started_at }}</time>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
 
 {% if layouts %}
 <details class="card" id="layouts">
@@ -105,12 +135,13 @@
 <div class="card">
   <h2>Runs</h2>
   <table class="stack">
-    <tr><th>When</th><th class="num">Time</th><th class="num">vs PB</th><th class="num">Laps</th><th class="num">Top km/h</th><th></th></tr>
+    <tr><th>When</th><th>Quad</th><th class="num">Time</th><th class="num" title="against the PB of the run's own quad and race length">vs PB</th><th class="num">Laps</th><th class="num">Top km/h</th><th></th></tr>
     {% for r in races %}
     <tr class="{% if r.is_best %}best{% endif %}">
       <td><a href="/races/{{ r.id }}"><time datetime="{{ utc_iso(r.started_at) }}">{{ r.started_at }}</time></a></td>
+      <td data-label="Quad">{{ r.quad_type or "—" }}</td>
       <td data-label="Time" class="num">{% if r.status == "finished" %}{{ format_ms(r.total_time_ms) }}{% else %}<span class="pill bad">aborted</span>{% endif %}</td>
-      <td data-label="vs PB" class="num {{ delta_class(r.total_time_ms - best.total_time_ms) if best and r.total_time_ms }}">{{ format_delta(r.total_time_ms - best.total_time_ms) if best and r.total_time_ms else "" }}</td>
+      <td data-label="vs PB" class="num {{ delta_class(vs_pb[r.id]) if r.id in vs_pb }}">{{ format_delta(vs_pb[r.id]) if r.id in vs_pb else "" }}</td>
       <td data-label="Laps" class="num">{{ r.total_laps }}</td>
       <td data-label="Top km/h" class="num">{{ format_speed(r.max_speed) }}</td>
       <td>{% if r.is_best %}<span class="pill accent">PB</span>{% endif %}</td>
@@ -163,7 +194,7 @@
     var run = Infinity, rd = P.map(function (p, i) { run = Math.min(run, p.ms); return (i ? "L" : "M") + x(i).toFixed(1) + " " + y(run).toFixed(1); }).join(" ");
     el("path", { d: rd, class: "series ref" }, pc);
     el("path", { d: P.map(function (p, i) { return (i ? "L" : "M") + x(i).toFixed(1) + " " + y(p.ms).toFixed(1); }).join(" "), class: "series" }, pc);
-    P.forEach(function (p, i) { var c = el("circle", { cx: x(i), cy: y(p.ms), r: p.best ? 6 : 4, class: "dot" + (p.best ? " best" : "") }, pc); var t = el("title", {}, c); t.textContent = "#" + p.id + " " + fmt(p.ms); c.style.cursor = "pointer"; c.addEventListener("click", function () { location.href = "/races/" + p.id; }); });
+    P.forEach(function (p, i) { var c = el("circle", { cx: x(i), cy: y(p.ms), r: p.best ? 6 : 4, class: "dot" + (p.best ? " best" : "") }, pc); var t = el("title", {}, c); t.textContent = "#" + p.id + " " + fmt(p.ms) + (p.quad ? " · " + p.quad : ""); c.style.cursor = "pointer"; c.addEventListener("click", function () { location.href = "/races/" + p.id; }); });
     var first = el("text", { x: L, y: H - 8, class: "label" }, pc); first.textContent = "first"; var last = el("text", { x: W - R, y: H - 8, class: "label", "text-anchor": "end" }, pc); last.textContent = "latest";
   }
 

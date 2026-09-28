@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -11,6 +12,7 @@ from splitter.core import quads
 from splitter.core import sections as sec
 from splitter.core.splits import theoretical_best
 from splitter.db import repos
+from splitter.db.models import Race
 from splitter.web import analysis
 from splitter.web.templating import templates
 
@@ -20,30 +22,116 @@ router = APIRouter(prefix="/tracks")
 @router.get("", response_class=HTMLResponse)
 async def tracks_page(request: Request) -> Any:
     async with request.app.state.session_factory() as db:
-        summaries = await repos.track_summaries(db)
-    return templates.TemplateResponse(request, "tracks.html", {"summaries": summaries})
+        groups = repos.group_tracks(await repos.track_summaries(db))
+    return templates.TemplateResponse(request, "tracks.html", {"groups": groups})
+
+
+@dataclass
+class QuadPB:
+    """One PB key of a track (quad and race length) for the "PB by quad" table."""
+
+    quad_model_id: int
+    quad_type: str
+    race_laps: int
+    runs: int
+    finished: int
+    best: Race | None
+    best_lap_ms: int | None
+
+
+def pb_groups(races: list[Race]) -> list[QuadPB]:
+    """Per (quad model, laps): the PB run, counts and best lap; unidentified
+    tracks (id 0) have no PBs, so ``best`` stays None there."""
+    order: list[tuple[int, int]] = []
+    members: dict[tuple[int, int], list[Race]] = {}
+    for r in races:
+        k = (r.quad_model_id, r.race_laps)
+        if k not in members:
+            order.append(k)
+            members[k] = []
+        members[k].append(r)
+    out: list[QuadPB] = []
+    for k in order:
+        runs = members[k]
+        finished = [r for r in runs if r.status == "finished" and (r.total_time_ms or 0) > 0]
+        best = min(finished, key=lambda r: (r.total_time_ms or 0, r.id)) if finished else None
+        laps = [lap.lap_ms for r in finished for lap in r.laps]
+        out.append(
+            QuadPB(
+                quad_model_id=k[0],
+                quad_type=quads.model_name(k[0]) or runs[-1].quad_type,
+                race_laps=k[1],
+                runs=len(runs),
+                finished=len(finished),
+                best=best if runs[-1].track_id > 0 else None,
+                best_lap_ms=min(laps) if laps else None,
+            )
+        )
+    out.sort(key=lambda p: (p.quad_type.lower(), p.race_laps))
+    return out
+
+
+def default_laps(races: list[Race]) -> int:
+    """The race length to open a track on: the most flown (finished runs
+    first), so totals on the page compare like with like."""
+    finished = [r.race_laps for r in races if r.status == "finished"] or [
+        r.race_laps for r in races
+    ]
+    return max(set(finished), key=finished.count) if finished else 0
 
 
 @router.get("/detail", response_class=HTMLResponse)
 async def track_page(
-    request: Request, track_id: int = 0, quad_model: int = 0, laps: int = 0, track: str = ""
+    request: Request,
+    track_id: int = 0,
+    quad_model: int | None = None,
+    laps: int | None = None,
+    track: str = "",
 ) -> Any:
-    """One PB group. ``track`` (a name) only matters for id-less legacy runs."""
-    key = repos.PBKey(track_id, quad_model, laps)
+    """One track, every quad it was flown with. PBs are still kept per quad
+    and race length (the "PB by quad" table); ``quad_model`` narrows the
+    analysis to one quad and ``laps`` to one race length (default: the most
+    flown). ``track`` (a name) only matters for id-less legacy runs."""
+    identified = track_id > 0
     async with request.app.state.session_factory() as db:
-        races = await repos.races_for_key(db, key)
-        if not key.valid:
-            races = [r for r in races if r.track_name == track]
+        everything = await repos.races_for_track(db, track_id, track)
+        if laps is None:
+            laps = default_laps(everything)
+        races = [
+            r
+            for r in everything
+            if r.race_laps == laps and (quad_model is None or r.quad_model_id == quad_model)
+        ]
         finished = [r for r in races if r.status == "finished" and r.total_time_ms is not None]
         best = min(finished, key=lambda r: r.total_time_ms or 0) if finished else None
-        sections = await analysis.track_analysis(db, track_id, races, best) if key.valid else None
-        layouts = await repos.fingerprints_for_track(db, track_id) if key.valid else []
-    track = races[-1].track_name if races else track
-    quad = quads.model_name(quad_model) or (races[-1].quad_type if races else "")
+        sections = await analysis.track_analysis(db, track_id, races, best) if identified else None
+        layouts = await repos.fingerprints_for_track(db, track_id) if identified else []
+    pbs = pb_groups(everything)
+    track = everything[-1].track_name if everything else track
+    quad_names = {p.quad_model_id: p.quad_type for p in pbs}
+    quad = quad_names.get(quad_model, "") if quad_model is not None else ""
+    quad_options = sorted({(p.quad_model_id, p.quad_type) for p in pbs}, key=lambda q: q[1].lower())
+    laps_options = sorted({p.race_laps for p in pbs})
+    # Each run against the PB of its own quad and length (they differ when
+    # the page shows every quad).
+    pb_of: dict[tuple[int, int], int] = {
+        (p.quad_model_id, p.race_laps): p.best.total_time_ms or 0 for p in pbs if p.best
+    }
+    vs_pb = {
+        r.id: (r.total_time_ms or 0) - pb_of[(r.quad_model_id, r.race_laps)]
+        for r in races
+        if r.status == "finished" and r.total_time_ms and (r.quad_model_id, r.race_laps) in pb_of
+    }
 
     # Progression: total time per finished run, in order.
     progression = [
-        {"id": r.id, "at": r.started_at.isoformat() + "Z", "ms": r.total_time_ms, "best": r.is_best}
+        {
+            "id": r.id,
+            "at": r.started_at.isoformat() + "Z",
+            "ms": r.total_time_ms,
+            "best": r.is_best,
+            "quad": quad_names.get(r.quad_model_id) or r.quad_type,
+        }
         for r in finished
     ]
     # Gate consistency: per crossing index, best / median / this-PB segment time.
@@ -83,12 +171,20 @@ async def track_page(
         {
             "track": track,
             "track_id": track_id,
+            "track_query": track if not identified else "",
             "quad": quad,
+            "quad_model": quad_model,
+            "quad_options": quad_options,
             "laps": laps,
-            "identified": key.valid,
+            "laps_options": laps_options,
+            "pbs": pbs,
+            "identified": identified,
             "races": list(reversed(races)),
+            "all_runs": len(everything),
+            "vs_pb": vs_pb,
             "finished_count": len(finished),
             "best": best,
+            "best_quad": (quad_names.get(best.quad_model_id) or best.quad_type) if best else "",
             "best_lap": best_lap,
             "theoretical": theo,
             "progression": progression,
