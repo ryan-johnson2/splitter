@@ -1,6 +1,7 @@
 # Implementation plan: capture nodes, web server, and sync
 
-Status: phases 1 to 4 released as v0.9.0 (2026-09-27); phase 5 is next. The design is
+Status: phases 1 to 4 released as v0.9.0 (2026-09-27), phase 5 as v0.10.0
+(2026-09-28); phase 6 (multi-user, #15) is what remains. The design is
 `docs/sync-design.md`; this is how it gets built, phase by phase, against the
 code as it stands at 0.5.2. Each phase ships on its own, keeps the current
 single-process app working, and is tracked by one GitHub issue.
