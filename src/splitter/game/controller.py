@@ -40,10 +40,10 @@ from velocidrone_ws import (
 
 from splitter.core import crashes as crash_detect
 from splitter.core import fingerprint as fingerprinting
-from splitter.core import geometry, quads, sections, trackcheck
+from splitter.core import geometry, pathtiming, quads, sections, trackcheck
 from splitter.core.geometry import GatePosition
 from splitter.core.splits import Reference
-from splitter.core.telemetry import SegmentStats, TelemetryBuffer
+from splitter.core.telemetry import Sample, SegmentStats, TelemetryBuffer
 from splitter.core.timing import Crossing, RaceTracker
 from splitter.db import repos
 from splitter.db.models import GateTime, Lap, Race
@@ -70,6 +70,7 @@ log = logging.getLogger(__name__)
 # abort inside this many seconds. Longer, or "race finished" from the game, is
 # a run the pilot flew and the game's gate data went missing — kept, with a note.
 KEEP_BLANK_AFTER_S = 15.0
+PATH_TIMED_NOTE = repos.PATH_TIMED_NOTE
 NO_GATE_DATA_NOTE = "No gate data: the game sent no crossings for this run."
 
 GAME_LOSS_GRACE_S = 10.0  # seconds without the game before a running race is aborted
@@ -145,6 +146,13 @@ class RaceController:
         # ``_finish_race``: a finished run with no crossings is the sign of a
         # connection the game has stopped sending gate data on).
         self.reconnect_game: Callable[[], None] | None = None
+        # Crossings from the flight path when the game sends no racedata
+        # (core/pathtiming.py): armed at GO when the track's gates are known,
+        # trusted once the first path crossing has waited GRACE_MS for the
+        # game's own and none came; dropped as soon as racedata flows.
+        self.path: pathtiming.PathDetector | None = None
+        self._path_pending: list[pathtiming.PathCrossing] = []
+        self.timing_source = ""
         self.last_track_check: dict[str, Any] | None = None
         self.race_id: int | None = None
         self.race_started_at: datetime | None = None
@@ -531,6 +539,10 @@ class RaceController:
     async def _on_race_data(self, data: RaceDataEvent) -> None:
         if not self.capture:
             return
+        if self.timing_source == "path":
+            # This run is timed from the flight path: the game's gate data for it
+            # was missing when it mattered and would only double-count now.
+            return
         me = self._pick_me(data)
         if me is None:
             return
@@ -591,6 +603,7 @@ class RaceController:
         sample = self.telemetry.add(
             t_ms, data.position, data.speed, (data.roll, data.pitch, data.yaw), data.attitude
         )
+        await self._feed_path(sample)
         if self.imu_missing:
             self.imu_missing = False
             self._hub.broadcast("imu_warning", {"missing": False})
@@ -651,6 +664,7 @@ class RaceController:
             db.add(race)
             await db.commit()
             self.race_id = race.id
+        await self._arm_path_timing()
         log.info(
             "race %d started: %s / %s / %d laps (reference: %s)",
             self.race_id,
@@ -730,6 +744,82 @@ class RaceController:
             await self._check_track()
         if crossing.finished:
             await self._finish_race(aborted=False)
+
+    # ── timing from the flight path (core/pathtiming.py) ──────────────
+
+    async def _arm_path_timing(self) -> None:
+        """At GO: if the session's track has known gates, watch the path for
+        crossings in case the game sends no racedata for this run."""
+        self.path = None
+        self._path_pending = []
+        self.timing_source = ""
+        track_id = self.session.track_id
+        if track_id <= 0 or not self._settings.get_bool("telemetry_enabled"):
+            return
+        geometry = await self._track_geometry(track_id)
+        if geometry is None:
+            return
+        count, positions = geometry
+        model = pathtiming.model_from_geometry(positions, count)
+        if model is not None and count:
+            self.path = pathtiming.PathDetector(model, count, self.session.race_laps)
+
+    async def _feed_path(self, sample: Sample) -> None:
+        path, tracker = self.path, self.tracker
+        if path is None or tracker is None:
+            return
+        found = path.feed(sample)
+        if self.timing_source == "path":
+            if found is not None:
+                await self._path_crossing(found)
+            return
+        if tracker.crossings:
+            # The game's own gate data is flowing: the path is not needed.
+            self.path = None
+            self._path_pending = []
+            return
+        if found is not None:
+            self._path_pending.append(found)
+        pending = self._path_pending
+        if not pending or sample.t_ms - pending[0].t_ms < pathtiming.GRACE_MS:
+            return
+        # The path went through the first gate and the game said nothing about
+        # it for GRACE_MS: this run gets no gate data. Time it from the path.
+        self.timing_source = "path"
+        self._path_pending = []
+        race_id = self.race_id
+        if race_id is not None:
+            async with self._sf() as db:
+                race = await db.get(Race, race_id)
+                if race is not None:
+                    race.timing_source = "path"
+                    race.notes = PATH_TIMED_NOTE
+                    await db.commit()
+        log.warning(
+            "race %s: no racedata from the game %d ms after the first gate — "
+            "timing this run from the flight path",
+            race_id,
+            pathtiming.GRACE_MS,
+        )
+        self._hub.broadcast(
+            "notice",
+            {
+                "level": "warn",
+                "message": "The game is sending no gate data for this run — "
+                "timing it from the flight path instead.",
+            },
+        )
+        for c in pending:
+            if self.tracker is None:
+                break
+            await self._path_crossing(c)
+
+    async def _path_crossing(self, found: pathtiming.PathCrossing) -> None:
+        if self.tracker is None:
+            return
+        crossing = self.tracker.update(found.lap, found.gate, found.t_ms, found.finished)
+        if crossing is not None:
+            await self._on_crossing(crossing)
 
     async def _track_geometry(
         self, track_id: int
@@ -922,6 +1012,13 @@ class RaceController:
                 self._reset_race()
                 return
             blank_finish = False
+            if not aborted and self.timing_source == "path" and not tracker.finished:
+                # The game says finished but the path never reached the last gate:
+                # a partial run, not a finish with a short total.
+                log.warning(
+                    "race %d: path timing did not reach the finish — kept as aborted", race_id
+                )
+                aborted = True
             if not aborted and (not tracker.crossings or tracker.total_ms <= 0):
                 # "race finished" without a single crossing. A finished race with a
                 # zero total would become an unbeatable PB — treat it as an abort,
@@ -1042,6 +1139,7 @@ class RaceController:
                 "telemetry_samples": stored,
                 "crashes": race.crash_count,
                 "ended_at": _iso(race.ended_at),
+                "timing_source": race.timing_source,
             }
         log.info(
             "race %d %s: %s ms, %d laps, %d crossings%s",
@@ -1081,6 +1179,9 @@ class RaceController:
         self.last_track_check = None
         self.race_id = None
         self.tracker = None
+        self.path = None
+        self._path_pending = []
+        self.timing_source = ""
         self.reference = None
         self.armed = False
         self.countdown = None

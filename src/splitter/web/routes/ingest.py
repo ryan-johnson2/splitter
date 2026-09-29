@@ -95,6 +95,8 @@ async def ingest_run(request: Request, uuid: str) -> JSONResponse:
                     # Not recognised: carry the node's previous track unless the
                     # run's own gates say it moved (the sticky rule).
                     await repos.infer_sticky(db, race)
+            if not repos.has_quad(race):
+                await repos.infer_sticky_quad(db, race)  # the same rule for the quad
             await repos.derive_delta(db, race)
             await repos.recalculate_best(db, repos.race_key(race))
             result = repos.ImportResult(race.uuid, "created", race.id, key=repos.race_key(race))

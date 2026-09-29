@@ -9,7 +9,7 @@
     {% for g in groups %}
     <tr>
       <td><a href="/tracks/detail?track_id={{ g.track_id }}{% if not g.track_id %}&track={{ g.track_name | urlencode }}{% endif %}">{{ g.track_name or "Unknown track" }}</a>{% if g.scenery %} <span class="muted small">{{ g.scenery }}</span>{% endif %}{% if g.track_id %} <span class="muted small">#{{ g.track_id }}</span>{% else %} <span class="pill bad small">no id</span>{% endif %}</td>
-      <td data-label="Quads">{{ g.quads | join(", ") }}</td>
+      <td data-label="Quads">{{ g.quads | join(", ") }}{% if g.no_quad %}{% if g.quads %}, {% endif %}<a href="/tracks/detail?track_id={{ g.track_id }}{% if not g.track_id %}&track={{ g.track_name | urlencode }}{% endif %}#set-quad" title="set the quad on these runs">unknown quad</a>{% if g.quads %} <span class="muted small">({{ g.no_quad }})</span>{% endif %}{% endif %}</td>
       <td data-label="Laps" class="num">{% for l in g.laps %}{% if not loop.first %} / {% endif %}{{ l or "?" }}{% endfor %}</td>
       <td data-label="Runs" class="num">{{ g.finished }}<span class="muted">/{{ g.runs }}</span></td>
       <td data-label="PB by quad" class="num pb-list">{% for k in g.keys %}<div>{% if k.best_race_id %}<a href="/races/{{ k.best_race_id }}">{{ format_ms(k.best_ms) }}</a>{% else %}--{% endif %}{% if g.keys | length > 1 %} <span class="muted small">{{ k.quad_type or "unknown quad" }}{% if g.laps | length > 1 %} · {{ k.race_laps or "?" }} laps{% endif %}</span>{% endif %}</div>{% endfor %}</td>

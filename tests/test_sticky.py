@@ -216,3 +216,94 @@ async def test_the_web_applies_it_at_ingest(web: Side, node: Side) -> None:
         assert got.id != ids[0]
     page = (await web.client.get("/races")).text
     assert "carried" in page
+
+
+# ── the same rule for the quad ─────────────────────────────────────────
+
+
+async def quads(sf: async_sessionmaker[AsyncSession], ids: list[int]) -> list[tuple[int, str]]:
+    async with sf() as db:
+        out = []
+        for i in ids:
+            r = await db.get(Race, i)
+            assert r is not None
+            out.append((r.quad_model_id, r.quad_source))
+        return out
+
+
+async def test_quadless_runs_carry_the_previous_quad_whatever_the_track(
+    session_factory: Any,
+) -> None:
+    ids = await add(
+        session_factory,
+        race_row(T0, 500, status="finished", quad_type="LightSwitch", quad_model_id=108),
+        race_row(T0 + 2 * M, 500, status="finished"),  # tracked, no quad
+        race_row(T0 + 4 * M, 501, status="finished"),  # another track: the quad chain goes on
+        race_row(T0 + 6 * M),  # no track either
+        race_row(T0 + 5 * 60 * M, 500, status="finished"),  # next day: nothing to carry from
+    )
+    async with session_factory() as db:
+        r = await db.get(Race, ids[3])
+        assert r is not None
+        assert sorted(x.id for x in await repos.infer_sticky_quad(db, r)) == ids[1:4]
+        assert await repos.infer_sticky_quad(db, r) == []  # has one now
+    assert await quads(session_factory, ids) == [
+        (108, ""),
+        (108, "sticky"),
+        (108, "sticky"),
+        (108, "sticky"),
+        (0, ""),
+    ]
+    async with session_factory() as db:
+        r = await db.get(Race, ids[1])
+        assert r is not None and r.quad_type == "LightSwitch"
+        # Runs moved from the unknown-quad key to the LightSwitch key: one PB there.
+        best = await repos.get_best_race(db, repos.PBKey(500, 108, 3))
+        assert best is not None and best.id == ids[0]
+        left = await repos.get_best_race(db, repos.PBKey(500, 0, 3))
+        assert left is not None and left.id == ids[4]  # only the next-day run is still there
+        assert await repos.infer_sticky_quads_all(db) == 0
+
+
+async def test_the_quad_sweep_and_a_named_but_uncatalogued_quad(session_factory: Any) -> None:
+    ids = await add(
+        session_factory,
+        race_row(T0, 500, quad_type="Homebuilt 5"),  # a name the catalog lacks still counts
+        race_row(T0 + M, 500),
+        race_row(T0 + 2 * M, 500, node="n2"),  # another node: nothing to carry
+        race_row(T0 + 3 * M, 500, node="n2", quad_model_id=89, quad_type="AOS 5.5"),
+        race_row(T0 + 4 * M, 500, node="n2"),
+    )
+    async with session_factory() as db:
+        assert await repos.infer_sticky_quads_all(db) == 2
+    got = await quads(session_factory, ids)
+    assert got == [(0, ""), (0, "sticky"), (0, ""), (89, ""), (89, "sticky")]
+    async with session_factory() as db:
+        r = await db.get(Race, ids[1])
+        assert r is not None and r.quad_type == "Homebuilt 5"
+
+
+async def test_the_web_carries_the_quad_at_ingest(web: Side, node: Side) -> None:
+    ctl = node.state.controller
+    sf = web.state.session_factory
+    node_id = node.state.settings.get("node_id")
+    await add(
+        sf,
+        race_row(
+            T0, 500, node=node_id, status="finished", quad_type="LightSwitch", quad_model_id=108
+        ),
+    )
+    await fly(ctl)  # no session on the node: no track, no quad
+    async with node.state.session_factory() as db:
+        race = (await db.execute(select(Race))).scalar_one()
+        assert race.quad_model_id == 0 and race.quad_type == ""
+        race.started_at = T0 + M
+        await db.commit()
+        doc = await repos.export_run(db, race, "test")
+    r = await web.client.put(f"/api/ingest/runs/{race.uuid}", json=doc, headers=auth(web))
+    assert r.status_code == 200
+    async with sf() as db:
+        got = await repos.get_race_by_uuid(db, race.uuid)
+        assert got is not None and got.track_id == 500 and got.session_source == "sticky"
+        assert got.quad_model_id == 108 and got.quad_source == "sticky"
+    assert "quad carried" in (await web.client.get("/races")).text

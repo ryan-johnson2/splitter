@@ -55,6 +55,17 @@ def position_at(samples: Sequence[Positioned], t_ms: int, *, max_gap_ms: int = 4
     return (a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, a.z + (b.z - a.z) * f)
 
 
+def heading_at(samples: Sequence[Positioned], t_ms: int, *, span_ms: int = 40) -> Point | None:
+    """Unit direction of travel at race time ``t_ms`` (from the path just before
+    and after it), or ``None`` where the path is not known on both sides."""
+    a, b = position_at(samples, t_ms - span_ms), position_at(samples, t_ms + span_ms)
+    if a is None or b is None:
+        return None
+    v = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
+    n = math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
+    return (v[0] / n, v[1] / n, v[2] / n) if n > 1e-6 else None
+
+
 @dataclass(frozen=True)
 class GatePosition:
     k: int  # lap-relative segment index (1-based), see core/sections.py
@@ -62,6 +73,11 @@ class GatePosition:
     y: float
     z: float
     samples: int  # crossings that contributed
+    # Mean direction of travel through the gate (unit vector; all zero when
+    # unknown). With the position it gives the gate's plane (core/pathtiming.py).
+    hx: float = 0.0
+    hy: float = 0.0
+    hz: float = 0.0
 
 
 def gate_positions(
@@ -72,20 +88,34 @@ def gate_positions(
     Each run is ``(trace, crossings)`` with crossings as ``(k, cumulative_ms)``.
     """
     acc: dict[int, list[Point]] = {}
+    heads: dict[int, list[Point]] = {}
     for trace, crossings in runs:
         for k, t_ms in crossings:
             p = position_at(trace, t_ms)
             if p is not None:
                 acc.setdefault(k, []).append(p)
+                h = heading_at(trace, t_ms)
+                if h is not None:
+                    heads.setdefault(k, []).append(h)
     out: dict[int, GatePosition] = {}
     for k, points in acc.items():
         n = len(points)
+        hx = hy = hz = 0.0
+        if heads.get(k):
+            hs = heads[k]
+            sx, sy, sz = (sum(h[0] for h in hs), sum(h[1] for h in hs), sum(h[2] for h in hs))
+            norm = math.sqrt(sx * sx + sy * sy + sz * sz)
+            if norm > 1e-6:
+                hx, hy, hz = sx / norm, sy / norm, sz / norm
         out[k] = GatePosition(
             k=k,
             x=sum(p[0] for p in points) / n,
             y=sum(p[1] for p in points) / n,
             z=sum(p[2] for p in points) / n,
             samples=n,
+            hx=hx,
+            hy=hy,
+            hz=hz,
         )
     return out
 

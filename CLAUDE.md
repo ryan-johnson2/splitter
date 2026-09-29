@@ -127,6 +127,38 @@ bridge.reconnect`, set in `app.py`), since the game had stopped sending gate
 data on that one. Whether a reconnect actually restores it is still to be
 confirmed against the game.
 
+### Timing from the flight path (0.10.2)
+
+2026-09-29, the gaming PC: the game kept the socket, streamed IMU and race
+status and said "race finished" run after run, but sent **no `racedata` for
+about half the runs** for 20 minutes (the node's protocol log: FinishGate,
+IMU every frame, `race finished`, not one crossing; runs between them were
+normal; nothing else was connected to the game). Nothing on our side can
+recover those frames, so `core/pathtiming.py` **detects crossings from the
+flight path**: the first pass through each gate's plane (`GatePosition` now
+carries a mean heading; `pathtiming.model_from_geometry` needs every gate
+`1..G` located, falling back to prev→next headings for bundle/registry rows
+without one) within `RADIUS_M` = 6 m, gates strictly in lap order, S/F first.
+Measured against the game on six real 3-lap runs (leave-one-out): every
+crossing in order, laps within 11 ms, totals within 15 ms, one gate ~1 s early
+on an approach pass. **Node, live** (`controller._arm_path_timing` at GO when
+the session's track has known geometry — local `track_geometry` or the
+bundle's; `_feed_path` on every IMU sample): path crossings queue until the
+first one is `GRACE_MS` = 1.5 s old with no racedata crossing → the run is
+locked to the path (`races.timing_source = "path"`, `notes = PATH_TIMED_NOTE`,
+a `notice`, racedata for the run ignored from then on, the finish detected
+from `race_laps`; a game "finished" before the path reached the last gate is
+kept as aborted); racedata arriving first drops the detector. **Stored runs**:
+`repos.retime_from_path` (only runs with a trace, a track and *no* crossings:
+`retime_candidates`) rebuilds gate_times/laps with stats from the trace,
+status/total, crashes re-attributed, fingerprint, PB; `POST /races/retime`
+(Races page line "n runs have a flight path but no gate data"), `POST
+/races/{id}/retime` (race page button), `splitter retime [ids]`. Path-timed
+runs count as PBs and are marked *path-timed* / *timed from the flight path*.
+Not covered: an unknown track (no geometry), partial racedata loss mid-run
+(the detector is dropped once racedata flows; seen once: run 138 lost only its
+finish crossing).
+
 ## Telemetry (IMU)
 
 Opt-in in the game (`web-socket-imu`, Betaflight FC only), 60 Hz, local drone
@@ -389,6 +421,19 @@ stays unknown until the next run with a track. Not learned into the registry
 "runs with no track yet" line and on the Tracks page's no-track card (0.10.0).
 The node itself is not touched: its live session already carries the track,
 and when a track check unsets it the run contradicted it anyway.
+
+**The same rule for the quad (0.10.2).** Ryan (2026-09-29): "carry the quad
+forward just like the track". `repos.infer_sticky_quad` / `infer_sticky_quads_all`:
+a run that names no quad (`has_quad`: model id 0 *and* empty `quad_type`) takes
+the quad of the last run before it on the same node (gaps under `STICKY_GAP`),
+`quad_source = "sticky"` (Races page: *quad carried*). Nothing can contradict a
+quad and the chain is independent of the track's (a track change does not end
+it). Runs at ingest for every quad-less run, in the identify sweep (*Find their
+tracks* / `--identify`), and PBs are re-flagged for the key left and the key
+joined. Hand edits set `quad_source = "manual"`. The Tracks list links *unknown
+quad* to the track page's *Set the quad on n runs* card (`#set-quad`: quad
+picker → `POST /races/bulk` with `next` to come back), and the *PB by quad*
+table's unknown row points at it.
 
 ## Label by layout (sync phase 4)
 

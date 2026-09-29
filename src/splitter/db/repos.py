@@ -183,6 +183,10 @@ async def update_race(session: AsyncSession, race_id: int, **fields: Any) -> Rac
         await session.commit()
         await learn_fingerprint(session, race)
         await derive_delta(session, race)
+    if fields.get("quad_model_id", 0) > 0 or fields.get("quad_type"):
+        race.quad_source = "manual"
+        await session.commit()
+        await derive_delta(session, race)
     await session.commit()
     new_key = race_key(race)
     await recalculate_best(session, old_key)
@@ -219,6 +223,7 @@ class TrackSummary:
     best_race_id: int | None
     best_lap_ms: int | None
     last_run_at: datetime | None
+    no_quad: int = 0  # runs in the group that name no quad at all
 
     @property
     def key(self) -> PBKey:
@@ -242,6 +247,7 @@ async def track_summaries(session: AsyncSession) -> list[TrackSummary]:
             func.sum(func.iif(Race.status == "finished", 1, 0)),
             func.min(func.iif(Race.status == "finished", Race.total_time_ms, None)),
             func.max(Race.started_at),
+            func.sum(func.iif((Race.quad_model_id == 0) & (Race.quad_type == ""), 1, 0)),
         )
         .group_by(
             Race.track_id,
@@ -253,7 +259,7 @@ async def track_summaries(session: AsyncSession) -> list[TrackSummary]:
     )
     out: list[TrackSummary] = []
     for row in await session.execute(stmt):
-        track_id, quad_model_id, track, scenery, quad, laps, runs, finished, best_ms, last = row
+        track_id, quad_model_id, track, scenery, quad, laps, runs, finished, best_ms, last, nq = row
         key = PBKey(track_id, quad_model_id, laps)
         best_id: int | None = None
         best_lap: int | None = None
@@ -287,6 +293,7 @@ async def track_summaries(session: AsyncSession) -> list[TrackSummary]:
                 best_race_id=best_id,
                 best_lap_ms=best_lap,
                 last_run_at=last,
+                no_quad=nq or 0,
             )
         )
     return out
@@ -317,12 +324,16 @@ class TrackGroup:
 
     @property
     def quads(self) -> list[str]:
+        """The quads named on the track's runs; see ``no_quad`` for the rest."""
         out: list[str] = []
         for k in self.keys:
-            name = k.quad_type or "unknown quad"
-            if name not in out:
-                out.append(name)
+            if k.quad_type and k.quad_type not in out:
+                out.append(k.quad_type)
         return out
+
+    @property
+    def no_quad(self) -> int:
+        return sum(k.no_quad for k in self.keys)
 
     @property
     def laps(self) -> list[int]:
@@ -664,6 +675,132 @@ async def races_with_crashes(session: AsyncSession, track_id: int) -> list[Race]
         select(Race).where((Race.track_id == track_id) & (Race.crash_count > 0)).order_by(Race.id)
     )
     return list((await session.execute(stmt)).scalars().all())
+
+
+PATH_TIMED_NOTE = "Timed from the flight path: the game sent no gate data for this run."
+
+
+def _retime_filter() -> Any:
+    """Runs with a trace and a track but not one gate crossing: candidates for
+    timing from the flight path (core/pathtiming.py)."""
+    has_gates = select(GateTime.id).where(GateTime.race_id == Race.id).exists()
+    return (
+        (Race.status != "running") & (Race.track_id > 0) & (Race.telemetry_samples > 0) & ~has_gates
+    )
+
+
+async def retime_candidates(session: AsyncSession) -> list[Race]:
+    stmt = select(Race).where(_retime_filter()).order_by(Race.id)
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def retime_candidate_count(session: AsyncSession) -> int:
+    stmt = select(func.count(Race.id)).where(_retime_filter())
+    return int((await session.execute(stmt)).scalar() or 0)
+
+
+async def retime_from_path(session: AsyncSession, race: Race) -> int | None:
+    """Rebuild a run's crossings and laps from its stored trace and the track's
+    known gates. Only for runs with no gate data at all; returns how many
+    crossings were found, or None when there is nothing to work from (no
+    trace, no track, gates not known, or the path reached no gate)."""
+    from splitter.core import crashes as crash_detect
+    from splitter.core import fingerprint as fingerprinting
+    from splitter.core import pathtiming
+    from splitter.core.telemetry import segment_stats
+    from splitter.core.timing import RaceTracker
+
+    if race.gate_times or race.track_id <= 0 or race.telemetry_samples <= 0:
+        return None
+    count, positions = await track_geometry(session, race.track_id)
+    model = pathtiming.model_from_geometry(positions, count)
+    if model is None or not count:
+        return None
+    samples = await telemetry_for_race(session, race.id)
+    found = pathtiming.reconstruct(samples, model, count, race.race_laps)
+    if not found:
+        return None
+    tracker = RaceTracker()
+    crossings = [c for c in (tracker.update(f.lap, f.gate, f.t_ms, f.finished) for f in found) if c]
+    if not crossings:
+        return None
+    await session.execute(delete(GateTime).where(GateTime.race_id == race.id))
+    await session.execute(delete(Lap).where(Lap.race_id == race.id))
+
+    def stats(from_ms: int, to_ms: int) -> dict[str, float | None]:
+        st = segment_stats([s for s in samples if from_ms < s.t_ms <= to_ms])
+        if st is None:
+            return {}
+        return {
+            "max_speed": round(st.max_speed, 2),
+            "avg_speed": round(st.avg_speed, 2),
+            "distance_m": round(st.distance_m, 1),
+            "min_speed": round(st.min_speed, 2),
+            "min_accel": st.min_accel,
+            "max_accel": st.max_accel,
+        }
+
+    for c in crossings:
+        session.add(
+            GateTime(
+                race_id=race.id,
+                seq=c.seq,
+                lap=c.lap,
+                gate=c.gate,
+                cumulative_ms=c.cumulative_ms,
+                gate_ms=c.gate_ms,
+                lap_elapsed_ms=c.lap_elapsed_ms,
+                ends_lap=c.lap_done.lap if c.lap_done else None,
+                **stats(c.cumulative_ms - c.gate_ms, c.cumulative_ms),
+            )
+        )
+    for lap in tracker.laps:
+        session.add(
+            Lap(
+                race_id=race.id,
+                lap=lap.lap,
+                lap_ms=lap.lap_ms,
+                cumulative_ms=lap.cumulative_ms,
+                gates=lap.gates,
+                **stats(lap.cumulative_ms - lap.lap_ms, lap.cumulative_ms),
+            )
+        )
+    race.total_laps = len(tracker.laps)
+    race.gates_per_lap = tracker.gates_per_lap
+    race.holeshot_ms = tracker.holeshot_ms
+    race.status = "finished" if tracker.finished else "aborted"
+    race.total_time_ms = tracker.total_ms if tracker.finished else None
+    race.timing_source = "path"
+    race.notes = PATH_TIMED_NOTE
+    refs = [
+        _CrossingView(c.seq, c.lap, c.lap_done.lap if c.lap_done else None, c.cumulative_ms)
+        for c in crossings
+    ]
+    found_crashes = crash_detect.attribute(crashes_of(race), refs)
+    race.crashes = json.dumps([x.to_dict() for x in found_crashes])
+    race.crash_count = len(found_crashes)
+    fp = fingerprinting.compute(
+        refs,
+        tracker.gates_per_lap,
+        samples,
+        [(lap.lap, lap.lap_ms) for lap in tracker.laps],
+        [x.lap for x in found_crashes],
+    )
+    race.fingerprint = json.dumps(fp.to_dict()) if fp else ""
+    await session.commit()
+    await session.refresh(race)
+    await learn_fingerprint(session, race)
+    await recalculate_best(session, race_key(race))
+    await derive_delta(session, race)
+    return len(crossings)
+
+
+@dataclass(frozen=True)
+class _CrossingView:
+    seq: int
+    lap: int
+    ends_lap: int | None
+    cumulative_ms: int
 
 
 def crashes_of(race: Race) -> list[Crash]:
@@ -1137,13 +1274,15 @@ def _carry(race: Race, source: Race) -> None:
     race.track_note = ""
 
 
-async def _settle(session: AsyncSession, done: list[Race]) -> None:
+async def _settle(session: AsyncSession, done: list[Race], was: set[PBKey] | None = None) -> None:
+    """Commit carried runs, derive their deltas and re-flag PBs for every key
+    they now belong to and (``was``) every key they left."""
     if not done:
         return
     await session.commit()
     for r in done:
         await derive_delta(session, r)
-    for key in {race_key(r) for r in done}:
+    for key in {race_key(r) for r in done} | (was or set()):
         await recalculate_best(session, key)
 
 
@@ -1191,6 +1330,94 @@ async def infer_sticky(session: AsyncSession, race: Race) -> list[Race]:
             done.append(r)
     await _settle(session, done)
     return done
+
+
+def has_quad(race: Race) -> bool:
+    """The run says what it was flown with (a catalog model, or at least a name)."""
+    return race.quad_model_id > 0 or bool(race.quad_type)
+
+
+def _carry_quad(race: Race, source: Race) -> None:
+    race.quad_type = source.quad_type
+    race.quad_size = source.quad_size
+    race.quad_model_id = source.quad_model_id
+    race.quad_class_id = source.quad_class_id
+    race.quad_source = "sticky"
+
+
+async def infer_sticky_quad(session: AsyncSession, race: Race) -> list[Race]:
+    """The sticky rule for the quad (Ryan 2026-09-29: "carry the quad forward
+    just like the track"): ``race`` names no quad, so it and the quad-less
+    runs just before it on the same node (gaps under ``STICKY_GAP``) take the
+    quad of the last run that named one. Nothing can contradict a quad, and
+    the track chain is separate: a track change does not end this one."""
+    if has_quad(race) or not race.node_id:
+        return []
+    stmt = (
+        select(Race)
+        .where(
+            (Race.node_id == race.node_id)
+            & (Race.id != race.id)
+            & (Race.started_at <= race.started_at)
+            & (Race.status != "running")
+        )
+        .order_by(Race.started_at.desc(), Race.id.desc())
+        .limit(50)
+    )
+    before = list((await session.execute(stmt)).scalars().all())
+    between: list[Race] = []
+    later = race
+    opener: Race | None = None
+    for prev in before:
+        if later.started_at - prev.started_at > STICKY_GAP:
+            break
+        if has_quad(prev):
+            opener = prev
+            break
+        between.append(prev)
+        later = prev
+    if opener is None:
+        return []
+    done = [*reversed(between), race]
+    was = {race_key(r) for r in done}
+    for r in done:
+        _carry_quad(r, opener)
+    await _settle(session, done, was)
+    return done
+
+
+async def infer_sticky_quads_all(session: AsyncSession) -> int:
+    """The quad rule over the whole table, node by node in time order;
+    returns how many runs got a quad."""
+    rows = (
+        (
+            await session.execute(
+                select(Race)
+                .where(Race.status != "running")
+                .order_by(Race.node_id, Race.started_at, Race.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    done: list[Race] = []
+    was: set[PBKey] = set()
+    current: Race | None = None
+    last: Race | None = None
+    for r in rows:
+        if last is None or last.node_id != r.node_id or r.started_at - last.started_at > STICKY_GAP:
+            current = None
+        last = r
+        if has_quad(r):
+            current = r
+            continue
+        if current is None:
+            continue
+        was.add(race_key(r))
+        _carry_quad(r, current)
+        done.append(r)
+    await _settle(session, done, was)
+    return len(done)
 
 
 async def infer_sticky_all(session: AsyncSession) -> int:

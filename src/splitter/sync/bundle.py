@@ -44,7 +44,16 @@ def build(
         geom = {
             "gates_per_lap": count,
             "positions": [
-                [p.k, round(p.x, 3), round(p.y, 3), round(p.z, 3), p.samples]
+                [
+                    p.k,
+                    round(p.x, 3),
+                    round(p.y, 3),
+                    round(p.z, 3),
+                    p.samples,
+                    round(p.hx, 4),
+                    round(p.hy, 4),
+                    round(p.hz, 4),
+                ]
                 for p in positions.values()
             ],
         }
@@ -77,7 +86,14 @@ def to_geometry(bundle: dict[str, Any]) -> tuple[int | None, dict[int, GatePosit
     if not geom:
         return None
     positions = {
-        int(p[0]): GatePosition(int(p[0]), float(p[1]), float(p[2]), float(p[3]), int(p[4]))
+        int(p[0]): GatePosition(
+            int(p[0]),
+            float(p[1]),
+            float(p[2]),
+            float(p[3]),
+            int(p[4]),
+            *(float(v) for v in (p[5:8] if len(p) >= 8 else (0.0, 0.0, 0.0))),
+        )
         for p in geom.get("positions", [])
     }
     return geom.get("gates_per_lap"), positions

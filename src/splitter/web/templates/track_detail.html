@@ -43,6 +43,23 @@
   <div class="card kv">Theoretical best<b>{{ format_ms(theoretical) }}</b>{% if theoretical and best %}<span class="{{ delta_class(theoretical - best.total_time_ms) }}">{{ format_delta(theoretical - best.total_time_ms) }} vs PB</span> · fastest segment at every gate across {{ comparable }} runs{% endif %}</div>
 </div>
 
+{% if no_quad %}
+<div class="card" id="set-quad">
+  <h2>Set the quad on {{ no_quad | length }} run{{ "s" if no_quad | length != 1 }}</h2>
+  <p class="help">{% if no_quad | length == all_runs %}None of the runs on this track{% else %}{{ no_quad | length }} of the {{ all_runs }} runs on this track{% endif %} name{{ "s" if no_quad | length == 1 }} a quad, so they keep a personal best of their own under <i>unknown quad</i>. Pick what they were flown with and they join that quad's PB at once (the same as bulk edit on Races).</p>
+  <form method="post" action="/races/bulk" id="set-quad-form">
+    {% for r in no_quad %}<input type="hidden" name="race_ids" value="{{ r.id }}">{% endfor %}
+    <input type="hidden" name="next" value="{{ here }}">
+    <div class="row" id="set-quad-picker">
+      <div class="field"><label>Class</label><select class="qp-class"></select></div>
+      <div class="field"><label>Quad</label><select class="qp-model"></select></div>
+      <input type="hidden" name="quad_type" data-auto="1"><input type="hidden" name="quad_model_id" value="0"><input type="hidden" name="quad_class_id" value="0">
+    </div>
+    <div class="form-actions"><button type="submit" name="action" value="update" class="primary" id="set-quad-apply" disabled>Apply to {{ no_quad | length }} run{{ "s" if no_quad | length != 1 }}</button></div>
+  </form>
+</div>
+{% endif %}
+
 {% if pbs | length > 1 %}
 <div class="card" id="pb-by-quad">
   <div class="card-head"><h2>PB by quad</h2><span class="muted small">a personal best is kept per quad and race length · tap one to see just those runs</span></div>
@@ -50,7 +67,7 @@
     <tr><th>Quad</th><th class="num">Laps</th><th class="num">Runs</th><th class="num">PB</th><th class="num">Best lap</th><th></th></tr>
     {% for p in pbs %}
     <tr class="{% if p.quad_model_id == quad_model and p.race_laps == laps %}best{% endif %}">
-      <td><a href="{{ base }}&quad_model={{ p.quad_model_id }}&laps={{ p.race_laps }}">{{ p.quad_type or "unknown quad" }}</a></td>
+      <td><a href="{{ base }}&quad_model={{ p.quad_model_id }}&laps={{ p.race_laps }}">{{ p.quad_type or "unknown quad" }}</a>{% if not p.quad_type and no_quad %} <a class="small" href="#set-quad">set it…</a>{% endif %}</td>
       <td data-label="Laps" class="num">{{ p.race_laps or "?" }}</td>
       <td data-label="Runs" class="num">{{ p.finished }}<span class="muted">/{{ p.runs }}</span></td>
       <td data-label="PB" class="num">{% if p.best %}<a href="/races/{{ p.best.id }}">{{ format_ms(p.best.total_time_ms) }}</a>{% else %}--{% endif %}</td>
@@ -173,6 +190,13 @@
   if (root && window.Splitter && Splitter.trackPicker) {
     var apply = document.getElementById("assign-track-apply");
     Splitter.trackPicker(root, { emptyText: "No track picked yet — search above.", onPick: function () { apply.disabled = false; } });
+  }
+  // The set-quad card: Apply arms once a model is picked.
+  var qroot = document.getElementById("set-quad-picker");
+  if (qroot && window.Splitter && Splitter.quadPicker) {
+    var qapply = document.getElementById("set-quad-apply"), qmodel = qroot.querySelector("[name=quad_model_id]");
+    Splitter.quadPicker(qroot).set(0, 0);
+    qroot.addEventListener("change", function () { qapply.disabled = !(parseInt(qmodel.value, 10) > 0); });
   }
 })();
 (function () {

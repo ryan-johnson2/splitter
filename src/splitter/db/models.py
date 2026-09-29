@@ -59,6 +59,12 @@ class Race(Base):
     player_name: Mapped[str] = mapped_column(default="")
     # Where the track/quad came from: game (session event) | sticky (last used) | manual
     session_source: Mapped[str] = mapped_column(default="")
+    # Where the quad came from when the node did not say: "" (the node's own
+    # session) | sticky (carried from the previous run on the web) | manual (edit)
+    quad_source: Mapped[str] = mapped_column(default="")
+    # "" = the game's own racedata; "path" = crossings detected from the IMU
+    # flight path because the game sent none (core/pathtiming.py).
+    timing_source: Mapped[str] = mapped_column(default="")
     start_finish_gate: Mapped[bool | None]
     status: Mapped[str] = mapped_column(default="running")  # running|finished|aborted
     started_at: Mapped[datetime]

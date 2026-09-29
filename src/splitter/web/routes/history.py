@@ -30,6 +30,7 @@ async def races_page(
         quads = await repos.distinct_quads(db)
         nodes = await repos.nodes_status(db)
         unidentified_count = await repos.unidentified_count(db)
+        retime_count = await repos.retime_candidate_count(db)
     return templates.TemplateResponse(
         request,
         "races.html",
@@ -39,6 +40,7 @@ async def races_page(
             "quads": quads,
             "nodes": nodes,
             "unidentified_count": unidentified_count,
+            "retime_count": retime_count,
             "filter": {
                 "track": track,
                 "quad": quad,
@@ -129,6 +131,7 @@ async def layouts_label(
                 track_source=track_source.strip(),
             )
             more = await repos.identify_unidentified(db)
+            await repos.infer_sticky_quads_all(db)
             note = f"Labelled {_ids(race_ids)} as {track_name.strip() or '#' + str(track_id)}"
             note += f"; {more} more recognised." if more else "."
     await request.app.state.controller.refresh_reference()
@@ -141,9 +144,49 @@ async def races_identify(request: Request) -> Any:
     queue), after the registry has learned something new."""
     async with request.app.state.session_factory() as db:
         n = await repos.identify_unidentified(db)
+        q = await repos.infer_sticky_quads_all(db)
     await request.app.state.controller.refresh_reference()
     note = f"Identified {n} run{'s' if n != 1 else ''}." if n else "Nothing new recognised."
+    if q:
+        note += f" {q} run{'s' if q != 1 else ''} got the quad of the run before."
     return redirect_with_flash("/races?unidentified=1", notice=note)
+
+
+@router.post("/retime")
+async def races_retime(request: Request) -> Any:
+    """Time every run that has a trace but no gate data from its flight path."""
+    done = found = 0
+    async with request.app.state.session_factory() as db:
+        for race in await repos.retime_candidates(db):
+            found += 1
+            if await repos.retime_from_path(db, race):
+                done += 1
+    await request.app.state.controller.refresh_reference()
+    if not found:
+        return redirect_with_flash("/races", notice="No run needs timing from its flight path.")
+    note = f"Timed {done} of {found} run{'s' if found != 1 else ''} from the flight path."
+    if done < found:
+        note += " The rest have no known gates on their track yet, or never reached one."
+    return redirect_with_flash("/races", notice=note)
+
+
+@router.post("/{race_id}/retime")
+async def race_retime(request: Request, race_id: int) -> Any:
+    async with request.app.state.session_factory() as db:
+        race = await repos.get_race(db, race_id)
+        if race is None:
+            raise HTTPException(404)
+        n = await repos.retime_from_path(db, race)
+    await request.app.state.controller.refresh_reference()
+    if n is None:
+        return redirect_with_flash(
+            f"/races/{race_id}",
+            error="Could not time this run from its path: it needs a trace, a track whose "
+            "gates are known from other runs, and no gate data of its own.",
+        )
+    return redirect_with_flash(
+        f"/races/{race_id}", notice=f"Timed from the flight path: {n} gate crossings."
+    )
 
 
 @router.get("/{race_id}", response_class=HTMLResponse)
@@ -288,14 +331,18 @@ async def races_bulk(
     track_source: str = Form(""),
     quad_model_id: int = Form(0),
     quad_class_id: int = Form(0),
+    next: str = Form(""),
 ) -> Any:
+    """Bulk edit or delete. ``next`` (a local path) is where to land afterwards:
+    the track page's fix-up cards post here and want to come back."""
+    back = next if next.startswith("/") and not next.startswith("//") else "/races"
     if not race_ids:
-        return redirect_with_flash("/races", error="Nothing selected.")
+        return redirect_with_flash(back, error="Nothing selected.")
     async with request.app.state.session_factory() as db:
         if action == "delete":
             for rid in race_ids:
                 await repos.delete_race(db, rid)
-            return redirect_with_flash("/races", notice=f"Deleted {_ids(race_ids)}.")
+            return redirect_with_flash(back, notice=f"Deleted {_ids(race_ids)}.")
         fields: dict[str, Any] = {}
         if track_name.strip():
             fields["track_name"] = track_name.strip()
@@ -307,7 +354,7 @@ async def races_bulk(
             _identity_fields(track_id, scene_id, track_source, quad_model_id, quad_class_id)
         )
         if not fields:
-            return redirect_with_flash("/races", error="Nothing to change.")
+            return redirect_with_flash(back, error="Nothing to change.")
         for rid in race_ids:
             await repos.update_race(db, rid, **fields)
     what = []
@@ -318,5 +365,5 @@ async def races_bulk(
     if "scenery" in fields:
         what.append(f"scenery → {fields['scenery']}")
     return redirect_with_flash(
-        "/races", notice=f"Updated {_ids(race_ids)}: {', '.join(what)}. PB flags recalculated."
+        back, notice=f"Updated {_ids(race_ids)}: {', '.join(what)}. PB flags recalculated."
     )

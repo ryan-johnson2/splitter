@@ -169,6 +169,26 @@ async def _cmd_migrate_telemetry(cfg: Config, args: argparse.Namespace) -> None:
         print("dropped the telemetry table (it is recreated empty at next start)")
 
 
+async def _cmd_retime(cfg: Config, args: argparse.Namespace) -> None:
+    """Time runs that have a trace but no gate data from their flight path."""
+    from splitter.db import repos
+
+    sf = await _open(cfg)
+    async with sf() as db:
+        races = await repos.retime_candidates(db)
+        if args.ids:
+            races = [r for r in races if r.id in set(args.ids)]
+        done = 0
+        for race in races:
+            n = await repos.retime_from_path(db, race)
+            done += n is not None
+            print(
+                f"#{race.id:<5} {race.track_name[:30]:<30} "
+                + (f"{n} crossings, {race.total_laps} laps, {race.status}" if n else "not possible")
+            )
+        print(f"{done} of {len(races)} run(s) timed from the flight path")
+
+
 async def _cmd_backfill_fingerprints(cfg: Config, args: argparse.Namespace) -> None:
     """Fingerprint runs that were recorded before fingerprints existed, from their traces."""
     import json
@@ -211,6 +231,8 @@ async def _cmd_backfill_fingerprints(cfg: Config, args: argparse.Namespace) -> N
             if await repos.learn_fingerprint(db, race) is not None:
                 learned += 1
         identified = await repos.identify_unidentified(db) if args.identify else 0
+        if args.identify:
+            identified += await repos.infer_sticky_quads_all(db)
     print(
         f"scanned {len(races)} runs, fingerprinted {done}, "
         f"{learned} new layout(s) registered"
@@ -246,6 +268,10 @@ def main(argv: list[str] | None = None) -> None:
         "migrate-telemetry", help="convert legacy telemetry rows to blobs; --drop the old table"
     )
     p.add_argument("--drop", action="store_true")
+    p = sub.add_parser(
+        "retime", help="time runs that have a trace but no gate data from their flight path"
+    )
+    p.add_argument("ids", nargs="*", type=int, help="only these run ids (default: every candidate)")
     p = sub.add_parser(
         "backfill-fingerprints", help="fingerprint older runs from their stored traces"
     )
@@ -304,6 +330,8 @@ def main(argv: list[str] | None = None) -> None:
         asyncio.run(_cmd_import(cfg, args))
     elif args.cmd == "migrate-telemetry":
         asyncio.run(_cmd_migrate_telemetry(cfg, args))
+    elif args.cmd == "retime":
+        asyncio.run(_cmd_retime(cfg, args))
     elif args.cmd == "backfill-fingerprints":
         asyncio.run(_cmd_backfill_fingerprints(cfg, args))
     elif args.cmd == "service":

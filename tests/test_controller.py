@@ -614,3 +614,129 @@ async def test_missing_imu_is_flagged_and_clears_on_the_first_frame(
     warnings = [m["data"] for m in h.drain(q) if m["type"] == "imu_warning"]
     assert warnings == [{"missing": False}]
     assert controller.snapshot()["imu_missing"] is False
+
+
+# ── timing from the flight path when the game sends no racedata ──────
+
+
+async def fly_circle(
+    controller: RaceController,
+    laps: int = 2,
+    racedata: bool = True,
+    finish_status: bool = True,
+    fly_laps: int | None = None,
+) -> None:
+    """A run on a circular track (tests/test_pathtiming.py geometry) with 60 Hz
+    IMU; ``racedata=False`` is what the game did on 2026-09-29: FinishGate,
+    IMU and race status, but not one crossing."""
+    from tests.test_pathtiming import G, angle_at, crossing_times
+
+    await controller.handle_event(h.status("start"))
+    await controller.handle_event(h.racetype(laps))
+    for n in (3, 2, 1, 0):
+        await controller.handle_event(h.countdown(n))
+    await controller.handle_event(h.ev("FinishGate", {"StartFinishGate": "True"}))
+    wire = []
+    lap = 0
+    for k, t in crossing_times(fly_laps or laps):
+        if k in (0, G):
+            if lap == laps:
+                wire.append((lap, G + 1, t / 1000, True))
+                continue
+            lap += 1
+            wire.append((lap, 1, t / 1000, False))
+        else:
+            wire.append((lap, k + 1, t / 1000, False))
+    ts = 1_000_000.0
+    import math
+
+    for lap_no, gate, t, fin in wire:
+        while ts - 1_000_000.0 < t * 1000:
+            rel = (ts - 1_000_000.0) / 1000
+            a = angle_at(rel)
+            await controller.handle_event(
+                h.imu(ts, 30 * math.cos(a), 30 * math.sin(a), -30 * math.sin(a), 30 * math.cos(a))
+            )
+            ts += 1000 / 60
+        if racedata:
+            await controller.handle_event(h.racedata(lap_no, gate, t, fin))
+    # A little more flying, then the game's verdict.
+    end = ts + 1500
+    while ts < end:
+        rel = (ts - 1_000_000.0) / 1000
+        a = angle_at(rel)
+        await controller.handle_event(
+            h.imu(ts, 30 * math.cos(a), 30 * math.sin(a), -30 * math.sin(a), 30 * math.cos(a))
+        )
+        ts += 1000 / 60
+    if finish_status:
+        await controller.handle_event(h.status("race finished"))
+    else:
+        await controller.handle_event(h.status("abort"))
+
+
+async def test_a_run_the_game_sends_no_gate_data_for_is_timed_from_the_path(
+    controller: RaceController, hub: LiveHub, session_factory
+) -> None:
+    from tests.test_pathtiming import LAP_S, G
+
+    await set_track(controller, "Circle", 600, 29)
+    await fly_circle(controller)  # a normal run: teaches where the gates are
+    async with session_factory() as db:
+        taught = (await db.execute(select(Race).order_by(Race.id.desc()))).scalars().first()
+        assert taught is not None and taught.status == "finished" and taught.timing_source == ""
+    q = hub.subscribe()
+    await fly_circle(controller, racedata=False)
+    msgs = h.drain(q)
+    async with session_factory() as db:
+        race = (await db.execute(select(Race).order_by(Race.id.desc()))).scalars().first()
+        assert race is not None and race.id != taught.id
+        assert race.status == "finished" and race.timing_source == "path"
+        assert race.notes == repos.PATH_TIMED_NOTE
+        assert race.total_laps == 2 and race.gates_per_lap == G
+        assert len(race.gate_times) == 1 + 2 * G
+        for lap in race.laps:
+            assert abs(lap.lap_ms - LAP_S * 1000) <= 15
+        assert (
+            race.total_time_ms is not None
+            and abs(race.total_time_ms - (1000 + 2 * LAP_S * 1000)) <= 15
+        )
+        assert race.fingerprint  # the path gave the run a fingerprint too
+        assert race.is_best or taught.is_best  # both are real finishes on the key
+    kinds = [m["type"] for m in msgs]
+    assert "notice" in kinds and kinds.count("crossing") == 1 + 2 * G
+    finished = next(m for m in msgs if m["type"] == "race_finished")
+    assert finished["data"]["timing_source"] == "path" and not finished["data"]["aborted"]
+    assert controller.path is None and controller.timing_source == ""
+
+
+async def test_the_path_is_ignored_while_the_game_sends_gate_data(
+    controller: RaceController, hub: LiveHub, session_factory
+) -> None:
+    await set_track(controller, "Circle", 600, 29)
+    await fly_circle(controller)
+    q = hub.subscribe()
+    await fly_circle(controller)
+    msgs = h.drain(q)
+    assert not any(m["type"] == "notice" for m in msgs)
+    async with session_factory() as db:
+        race = (await db.execute(select(Race).order_by(Race.id.desc()))).scalars().first()
+        assert race is not None and race.timing_source == "" and race.status == "finished"
+        assert len(race.gate_times) == 1 + 2 * 6  # not doubled by path crossings
+
+
+async def test_a_partial_path_timed_run_is_kept_as_aborted(
+    controller: RaceController, hub: LiveHub, session_factory
+) -> None:
+    await set_track(controller, "Circle", 600, 29)
+    await fly_circle(controller)
+    # The pilot restarts after one lap: abort from the game, crossings only from the path.
+    from tests.test_pathtiming import G
+
+    await fly_circle(controller, laps=2, fly_laps=1, racedata=False, finish_status=False)
+    async with session_factory() as db:
+        race = (await db.execute(select(Race).order_by(Race.id.desc()))).scalars().first()
+        assert race is not None and race.timing_source == "path"
+        assert race.status == "aborted" and race.total_time_ms is None and race.total_laps == 1
+        # One lap plus whatever the 1.5 s of flying after it crossed.
+        assert 1 + G <= len(race.gate_times) <= 2 + G

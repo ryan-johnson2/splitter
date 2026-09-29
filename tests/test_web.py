@@ -773,3 +773,103 @@ async def test_tracks_merge_by_id_with_a_pb_per_quad(client: AsyncClient) -> Non
     # A quad nobody flew: an empty page, not an error.
     r = await client.get("/tracks/detail?track_id=500&quad_model=1&laps=3")
     assert r.status_code == 200 and "0 finished of 0 runs" in r.text
+
+
+async def test_track_page_sets_the_quad_on_runs_without_one(client: AsyncClient) -> None:
+    from splitter.db import repos
+
+    await _fly_one(client)  # "Source One" is not in the catalog: model 0, but named
+    await _fly_one(client, scale=1.1)
+    # A run that names no quad at all (the hosted session always does, so unset it).
+    async with client.app.state.session_factory() as db:  # type: ignore[attr-defined]
+        rid = (await client.get("/api/races")).json()[0]["id"]
+        await repos.update_race(db, rid, quad_type="", quad_model_id=0, quad_source="")
+    page = (await client.get("/tracks")).text
+    assert "#set-quad" in page and "unknown quad" in page
+    html = (await client.get("/tracks/detail?track_id=500")).text
+    assert 'id="set-quad"' in html and "Set the quad on 1 run<" in html
+    assert f'name="race_ids" value="{rid}"' in html and 'name="next"' in html
+    r = await client.post(
+        "/races/bulk",
+        data={
+            "race_ids": str(rid),
+            "action": "update",
+            "quad_model_id": "108",
+            "next": "/tracks/detail?track_id=500",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303 and r.headers["location"].startswith("/tracks/detail?track_id=500")
+    race = (await client.get(f"/api/races/{rid}")).json()
+    assert race["quad_model_id"] == 108 and race["quad_type"] == "LightSwitch"
+    html = (await client.get("/tracks/detail?track_id=500")).text
+    assert 'id="set-quad"' not in html
+    # A `next` that leaves the site is not followed.
+    r = await client.post(
+        "/races/bulk",
+        data={"race_ids": str(rid), "action": "update", "quad_model_id": "89", "next": "//x"},
+        follow_redirects=False,
+    )
+    assert r.headers["location"].startswith("/races")
+
+
+async def test_a_stored_run_with_no_gate_data_is_timed_from_its_path(client: AsyncClient) -> None:
+    """The rebuild for runs already on file (the web, or a node after the fact)."""
+    import math
+    import uuid
+
+    from splitter.core.telemetry import Sample
+    from splitter.db import repos
+    from splitter.db.models import Race
+    from splitter.util import utcnow
+    from tests.test_controller import fly_circle, set_track
+    from tests.test_pathtiming import LAP_S, G, flight
+
+    controller = client.app.state.controller  # type: ignore[attr-defined]
+    await set_track(controller, "Circle", 600, 29)
+    await fly_circle(controller)  # teaches the gates
+    # A run with a 20 Hz trace and not one crossing, as 2026-09-29 left them.
+    samples = [
+        Sample(p.t_ms, p.x, p.y, p.z, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+        for p in flight(1 + 2 * LAP_S + 2, hz=20, y=1.0)
+    ]
+    async with client.app.state.session_factory() as db:  # type: ignore[attr-defined]
+        race = Race(
+            uuid=uuid.uuid4().hex,
+            node_id="n1",
+            track_id=600,
+            track_name="Circle",
+            scene_id=29,
+            track_source="community",
+            quad_type="Source One",
+            race_laps=2,
+            status="aborted",
+            started_at=utcnow(),
+            ended_at=utcnow(),
+            telemetry_samples=len(samples),
+            notes="No gate data: the game sent no crossings for this run.",
+        )
+        db.add(race)
+        await db.commit()
+        db.add(repos.telemetry_blob(race.id, samples, 20))
+        await db.commit()
+        rid = race.id
+    page = (await client.get("/races")).text
+    assert 'id="retime-line"' in page and "1 run has a flight path but no gate data" in page
+    detail = (await client.get(f"/races/{rid}")).text
+    assert f'action="/races/{rid}/retime"' in detail
+    r = await client.post(f"/races/{rid}/retime", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith(f"/races/{rid}?notice")
+    got = (await client.get(f"/api/races/{rid}")).json()
+    assert got["status"] == "finished" and got["total_laps"] == 2 and got["gates_per_lap"] == G
+    assert len(got["gate_times"]) == 1 + 2 * G
+    assert all(abs(lap["lap_ms"] - LAP_S * 1000) <= 15 for lap in got["laps"])
+    assert math.isclose(got["total_time_ms"], 1000 + 2 * LAP_S * 1000, abs_tol=15)
+    page = (await client.get("/races")).text
+    assert "path-timed" in page and 'id="retime-line"' not in page
+    assert "timed from the flight path" in (await client.get(f"/races/{rid}")).text
+    # Again: nothing left to do, and a run with gate data is refused.
+    r = await client.post("/races/retime", follow_redirects=False)
+    assert r.status_code == 303
+    r = await client.post(f"/races/{rid}/retime", follow_redirects=False)
+    assert "error" in r.headers["location"] or r.status_code == 303

@@ -107,6 +107,7 @@ async def track_page(
         sections = await analysis.track_analysis(db, track_id, races, best) if identified else None
         layouts = await repos.fingerprints_for_track(db, track_id) if identified else []
     pbs = pb_groups(everything)
+    no_quad = [r for r in everything if not repos.has_quad(r)]
     track = everything[-1].track_name if everything else track
     quad_names = {p.quad_model_id: p.quad_type for p in pbs}
     quad = quad_names.get(quad_model, "") if quad_model is not None else ""
@@ -178,6 +179,8 @@ async def track_page(
             "laps": laps,
             "laps_options": laps_options,
             "pbs": pbs,
+            "no_quad": no_quad,
+            "here": str(request.url.path) + ("?" + request.url.query if request.url.query else ""),
             "identified": identified,
             "races": list(reversed(races)),
             "all_runs": len(everything),
